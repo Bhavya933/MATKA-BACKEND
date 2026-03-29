@@ -264,7 +264,7 @@ const settleBets = (game_name, inputNumber, callback) => {
         return callback ? callback({ message: 'Result not yet declared. Skipping settlement.' }) : null;
     }
 
-    db.query('SELECT * FROM bets WHERE game_name = ? AND status = "Placed"', [game_name], (err, bets) => {
+    db.query('SELECT * FROM bets WHERE game_name = ? AND status = "PENDING"', [game_name], (err, bets) => {
         if (err) return callback ? callback({ error: err.message }) : null;
         if (bets.length === 0) return callback ? callback({ message: 'No pending bets for this game.' }) : null;
 
@@ -396,7 +396,7 @@ app.post('/api/login', (req, res) => {
 // Get all withdrawals
 app.get('/api/withdrawals', (req, res) => {
     const query = `
-        SELECT w.*, u.name as name 
+        SELECT w.*, u.mobile as name 
         FROM withdrawals w 
         JOIN users u ON w.user_id = u.id 
         ORDER BY w.created_at DESC
@@ -667,13 +667,13 @@ app.get('/api/users/:id/status', (req, res) => {
 
 // Fetch all deposits (Admin)
 app.get('/api/deposits', (req, res) => {
-    const sql = `
-        SELECT d.*, IFNULL(u.name, 'Unknown User') as name 
+    const query = `
+        SELECT d.*, IFNULL(u.mobile, 'Unknown User') as name 
         FROM deposits d 
         LEFT JOIN users u ON d.user_id = u.id 
         ORDER BY d.created_at DESC
     `;
-    db.query(sql, (err, results) => {
+    db.query(query, (err, results) => {
         if (err) {
             console.error("Fetch deposits error:", err.message);
             return res.status(500).json({ error: 'Fetch Deposits Error: ' + err.message });
