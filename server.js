@@ -166,7 +166,6 @@ db.getConnection((err, connection) => {
 const settleBets = (game_name, inputNumber, callback) => {
     const number = (inputNumber || 'XXX-XX-XXX').toUpperCase();
     
-    // Safety Check: Do not settle if the result is still just placeholders
     if (number === 'XXX-XX-XXX' || !/[0-9]/.test(number)) {
         return callback ? callback({ message: 'Result not yet declared. Skipping settlement.' }) : null;
     }
@@ -189,29 +188,30 @@ const settleBets = (game_name, inputNumber, callback) => {
         const getOutcome = (bet) => {
             let outcome = 'Placed';
             let multiplier = 10; 
+            const betNumber = String(bet.number || '').trim();
             
             if (bet.game_type === 'Single Digit') {
                 multiplier = 10;
-                if (bet.session === 'OPEN' && openDigit !== 'X') outcome = (bet.digit === openDigit) ? 'Won' : 'Lost';
-                else if (bet.session === 'CLOSE' && closeDigit !== 'X') outcome = (bet.digit === closeDigit) ? 'Won' : 'Lost';
+                if (bet.session === 'OPEN' && openDigit !== 'X') outcome = (betNumber === openDigit) ? 'Won' : 'Lost';
+                else if (bet.session === 'CLOSE' && closeDigit !== 'X') outcome = (betNumber === closeDigit) ? 'Won' : 'Lost';
             } else if (bet.game_type === 'Double Digit (Jodi)') {
                 multiplier = 100;
-                if (isJodiDeclared) outcome = (bet.digit === jodi) ? 'Won' : 'Lost';
+                if (isJodiDeclared) outcome = (betNumber === jodi) ? 'Won' : 'Lost';
             } else if (bet.game_type === 'Single Panna') {
                 multiplier = 160;
-                if (bet.session === 'OPEN' && !openPanna.includes('X')) outcome = (bet.digit === openPanna) ? 'Won' : 'Lost';
-                else if (bet.session === 'CLOSE' && !closePanna.includes('X')) outcome = (bet.digit === closePanna) ? 'Won' : 'Lost';
+                if (bet.session === 'OPEN' && !openPanna.includes('X')) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
+                else if (bet.session === 'CLOSE' && !closePanna.includes('X')) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
             } else if (bet.game_type === 'Double Panna') {
                 multiplier = 320;
-                if (bet.session === 'OPEN' && !openPanna.includes('X')) outcome = (bet.digit === openPanna) ? 'Won' : 'Lost';
-                else if (bet.session === 'CLOSE' && !closePanna.includes('X')) outcome = (bet.digit === closePanna) ? 'Won' : 'Lost';
+                if (bet.session === 'OPEN' && !openPanna.includes('X')) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
+                else if (bet.session === 'CLOSE' && !closePanna.includes('X')) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
             } else if (bet.game_type === 'Triple Panna') {
                 multiplier = 700;
-                if (bet.session === 'OPEN' && !openPanna.includes('X')) outcome = (bet.digit === openPanna) ? 'Won' : 'Lost';
-                else if (bet.session === 'CLOSE' && !closePanna.includes('X')) outcome = (bet.digit === closePanna) ? 'Won' : 'Lost';
+                if (bet.session === 'OPEN' && !openPanna.includes('X')) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
+                else if (bet.session === 'CLOSE' && !closePanna.includes('X')) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
             } else if (bet.game_type === 'Half Sangam') {
                 multiplier = 1000;
-                const bParts = bet.digit.split(/[x×]/);
+                const bParts = betNumber.split(/[x×]/);
                 if (bParts.length >= 2) {
                     if (bet.session === 'OPEN' && isOpenDeclared) outcome = (bParts[0].trim() === openPanna && bParts[1].trim() === openDigit) ? 'Won' : 'Lost';
                     else if (bet.session === 'CLOSE' && isCloseDeclared) outcome = (bParts[0].trim() === closePanna && bParts[1].trim() === closeDigit) ? 'Won' : 'Lost';
@@ -219,7 +219,7 @@ const settleBets = (game_name, inputNumber, callback) => {
             } else if (bet.game_type === 'Full Sangam') {
                 multiplier = 10000;
                 if (isOpenDeclared && isCloseDeclared) {
-                    const bParts = bet.digit.split(/[x×]/);
+                    const bParts = betNumber.split(/[x×]/);
                     if (bParts.length >= 2) outcome = (bParts[0].trim() === openPanna && bParts[1].trim() === closePanna) ? 'Won' : 'Lost';
                 }
             }
@@ -234,11 +234,13 @@ const settleBets = (game_name, inputNumber, callback) => {
 
             if (outcome === 'Won') {
                 const winAmount = bet.points * multiplier;
-                db.query('UPDATE users SET balance = balance + ? WHERE id = ?', [winAmount, bet.user_id], () => {
-                    db.query('UPDATE bets SET status = "Won" WHERE id = ?', [bet.id], processNext);
+                // Update balance using mobile number as the link
+                db.query('UPDATE users SET balance = balance + ? WHERE mobile = ?', [winAmount, bet.user_mobile], (err) => {
+                    if (err) console.error("Balance update failed for", bet.user_mobile, err.message);
+                    db.query('UPDATE bets SET status = "Won", result_number = ?, payoutDone = 1 WHERE id = ?', [number, bet.id], processNext);
                 });
             } else if (outcome === 'Lost') {
-                db.query('UPDATE bets SET status = "Lost" WHERE id = ?', [bet.id], processNext);
+                db.query('UPDATE bets SET status = "Lost", result_number = ? WHERE id = ?', [number, bet.id], processNext);
             } else {
                 processNext();
             }
@@ -253,12 +255,12 @@ const settleBets = (game_name, inputNumber, callback) => {
 
 // Sign Up
 app.post('/api/signup', (req, res) => {
-    const { username, password } = req.body;
-    const query = 'INSERT INTO users (username, password, role) VALUES (?, ?, "USER")';
-    db.query(query, [username, password], (err, result) => {
+    const { name, mobile, password } = req.body;
+    const query = 'INSERT INTO users (name, mobile, password, isAdmin) VALUES (?, ?, ?, 0)';
+    db.query(query, [name, mobile, password], (err, result) => {
         if (err) {
-            console.error('Signup Error:', err); // LOG THE FULL ERROR FOR RENDER
-            if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'Username already exists' });
+            console.error('Signup Error:', err);
+            if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'Mobile number already exists' });
             return res.status(500).json({ error: 'Database error: ' + err.message });
         }
         res.json({ message: 'User registered successfully', id: result.insertId });
@@ -267,21 +269,21 @@ app.post('/api/signup', (req, res) => {
 
 // Login
 app.post('/api/login', (req, res) => {
-    const { username, password } = req.body;
+    const { mobile, password } = req.body;
     const query = `
-      SELECT id, username, role, balance, is_blocked 
+      SELECT id, name, mobile, balance, isAdmin as role, isBlocked as is_blocked 
       FROM users 
-      WHERE username = ? AND password = ?
+      WHERE mobile = ? AND password = ?
     `;
     
-    db.query(query, [username, password], (err, results) => {
+    db.query(query, [mobile, password], (err, results) => {
         if (err) {
             console.error('SERVER LOGIN ERROR:', err);
             return res.status(500).json({ error: 'Database error: ' + err.message });
         }
         
         if (results.length === 0) {
-            return res.status(401).json({ error: 'Invalid username or password' });
+            return res.status(401).json({ error: 'Invalid mobile or password' });
         }
         
         const user = results[0];
@@ -300,7 +302,7 @@ app.post('/api/login', (req, res) => {
 // Get all withdrawals
 app.get('/api/withdrawals', (req, res) => {
     const query = `
-        SELECT w.*, u.username as name 
+        SELECT w.*, u.name as name 
         FROM withdrawals w 
         JOIN users u ON w.user_id = u.id 
         ORDER BY w.created_at DESC
@@ -542,7 +544,7 @@ app.get('/api/users/:id/balance', (req, res) => {
 
 // Admin: Get all users
 app.get('/api/users', (req, res) => {
-    const query = 'SELECT id, username, balance, is_blocked, created_at FROM users WHERE role = "USER" ORDER BY created_at DESC';
+    const query = 'SELECT id, name, mobile, balance, isBlocked as is_blocked, created_at FROM users WHERE isAdmin = 0 ORDER BY created_at DESC';
     db.query(query, (err, results) => {
         if (err) return res.status(500).json({ error: 'Database error' });
         res.json(results);
@@ -552,7 +554,7 @@ app.get('/api/users', (req, res) => {
 // Admin: Toggle block status
 app.put('/api/users/:id/toggle-block', (req, res) => {
     const { id } = req.params;
-    db.query('UPDATE users SET is_blocked = NOT is_blocked WHERE id = ?', [id], (err, result) => {
+    db.query('UPDATE users SET isBlocked = NOT isBlocked WHERE id = ?', [id], (err, result) => {
         if (err) return res.status(500).json({ error: 'Database error' });
         res.json({ message: 'Block status toggled successfully' });
     });
@@ -572,7 +574,7 @@ app.get('/api/users/:id/status', (req, res) => {
 // Fetch all deposits (Admin)
 app.get('/api/deposits', (req, res) => {
     const sql = `
-        SELECT d.*, IFNULL(u.username, 'Unknown User') as name 
+        SELECT d.*, IFNULL(u.name, 'Unknown User') as name 
         FROM deposits d 
         LEFT JOIN users u ON d.user_id = u.id 
         ORDER BY d.created_at DESC
@@ -669,26 +671,27 @@ app.put("/api/deposits/:id/status", (req, res) => {
 // --- BETTING ENDPOINTS ---
 
 // Fetch User Data (Balance + Bets + Block Status) - For AUTO SYNC
-app.get('/api/users/:id/sync', (req, res) => {
-    const { id } = req.params;
-    const userSql = 'SELECT balance, is_blocked FROM users WHERE id = ?';
-    const betsSql = 'SELECT * FROM bets WHERE user_id = ? ORDER BY created_at DESC LIMIT 50';
+app.get('/api/users/:mobile/sync', (req, res) => {
+    const { mobile } = req.params;
+    const userSql = 'SELECT balance, isAdmin, isBlocked FROM users WHERE mobile = ?';
+    const betsSql = 'SELECT * FROM bets WHERE user_mobile = ? ORDER BY created_at DESC LIMIT 50';
 
-    db.query(userSql, [id], (err, userRes) => {
+    db.query(userSql, [mobile], (err, userRes) => {
         if (err) {
             console.error("Sync user error:", err.message);
             return res.status(500).json({ error: 'Sync User Error: ' + err.message });
         }
         if (userRes.length === 0) return res.status(404).json({ error: 'User not found' });
 
-        db.query(betsSql, [id], (err, betsRes) => {
+        db.query(betsSql, [mobile], (err, betsRes) => {
             if (err) {
                 console.error("Sync bets error:", err.message);
                 return res.status(500).json({ error: 'Sync Bets Error: ' + err.message });
             }
             res.json({
                 balance: userRes[0].balance,
-                is_blocked: userRes[0].is_blocked,
+                is_blocked: userRes[0].isBlocked,
+                isAdmin: userRes[0].isAdmin,
                 bets: betsRes
             });
         });
@@ -743,7 +746,7 @@ app.delete('/api/users/:userId/accounts/:accountId', (req, res) => {
 
 // Place Bet (User)
 app.post('/api/bets', (req, res) => {
-    const { user_id, game_name, game_type, session, digit, points } = req.body;
+    const { user_mobile, game_name, game_type, session, number, points } = req.body;
 
     db.getConnection((err, conn) => {
         if (err) return res.status(500).json({ error: 'Database Connection Error: ' + err.message });
@@ -752,7 +755,7 @@ app.post('/api/bets', (req, res) => {
             if (err) { conn.release(); return res.status(500).json({ error: 'Trans Begin Error: ' + err.message }); }
 
             // 1. Check Balance
-            conn.query('SELECT balance FROM users WHERE id = ?', [user_id], (err, results) => {
+            conn.query('SELECT balance FROM users WHERE mobile = ?', [user_mobile], (err, results) => {
                 if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Check Bal Error: ' + err.message }); });
                 if (results.length === 0) return conn.rollback(() => { conn.release(); res.status(404).json({ error: 'User not found' }); });
 
@@ -760,12 +763,12 @@ app.post('/api/bets', (req, res) => {
                 if (balance < points) return conn.rollback(() => { conn.release(); res.status(400).json({ error: 'Insufficient Balance' }); });
 
                 // 2. Subtract Balance
-                conn.query('UPDATE users SET balance = balance - ? WHERE id = ?', [points, user_id], (err, results) => {
+                conn.query('UPDATE users SET balance = balance - ? WHERE mobile = ?', [points, user_mobile], (err, results) => {
                     if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Update Bal Error: ' + err.message }); });
 
                     // 3. Insert Bet
-                    const betSql = 'INSERT INTO bets (user_id, game_name, game_type, session, digit, points, status) VALUES (?, ?, ?, ?, ?, ?, "Placed")';
-                    conn.query(betSql, [user_id, game_name, game_type, session, digit, points], (err, results) => {
+                    const betSql = 'INSERT INTO bets (user_mobile, game_name, game_type, session, number, points, status) VALUES (?, ?, ?, ?, ?, ?, "Placed")';
+                    conn.query(betSql, [user_mobile, game_name, game_type, session, number, points], (err, results) => {
                         if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Insert Bet Error: ' + err.message }); });
 
                         conn.commit(err => {
