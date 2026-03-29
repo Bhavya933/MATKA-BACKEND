@@ -75,7 +75,7 @@ const syncSchema = () => {
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )`,
         `CREATE TABLE IF NOT EXISTS withdrawals (
-            id INT AUTO_INCREMENT PRIMARY KEY,
+            id VARCHAR(100) PRIMARY KEY,
             user_id INT NOT NULL,
             amount DECIMAL(10, 2) NOT NULL,
             status ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'PENDING',
@@ -104,6 +104,17 @@ const syncSchema = () => {
             db.query("ALTER TABLE users ADD COLUMN is_blocked BOOLEAN DEFAULT FALSE", (err) => {
                 if (err) console.error("Could not add is_blocked column:", err.message);
                 else console.log("Added is_blocked column to users table.");
+            });
+        }
+    });
+
+    // Handle withdrawals ID type migration (INT -> VARCHAR for custom strings)
+    db.query("SHOW COLUMNS FROM withdrawals LIKE 'id'", (err, rows) => {
+        if (!err && rows.length > 0 && rows[0].Type.toLowerCase().includes('int')) {
+            console.log("Migrating withdrawals ID column to VARCHAR...");
+            db.query("ALTER TABLE withdrawals MODIFY id VARCHAR(100)", (err) => {
+                if (err) console.error("Could not migrate withdrawals ID column:", err.message);
+                else console.log("Migrated withdrawals ID column to VARCHAR.");
             });
         }
     });
@@ -245,7 +256,7 @@ app.post('/api/withdrawals/status', (req, res) => {
 
 // Request new withdrawal
 app.post('/api/withdrawals', (req, res) => {
-    const { user_id, amount, method, upi_id, account_number, ifsc } = req.body;
+    const { id, user_id, amount, method, upi_id, account_number, ifsc } = req.body;
     const withdrawAmount = parseFloat(amount || 0);
 
     db.getConnection((err, conn) => {
@@ -266,15 +277,15 @@ app.post('/api/withdrawals', (req, res) => {
                 conn.query('UPDATE users SET balance = balance - ? WHERE id = ?', [withdrawAmount, user_id], (err, userRes) => {
                     if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Balance deduction failed: ' + err.message }); });
 
-                    // 3. Insert withdrawal request
-                    const insertSql = 'INSERT INTO withdrawals (user_id, amount, method, upi_id, account_number, ifsc, status) VALUES (?, ?, ?, ?, ?, ?, "PENDING")';
-                    conn.query(insertSql, [user_id, withdrawAmount, method, upi_id, account_number, ifsc], (err, result) => {
+                    // 3. Insert withdrawal request WITH custom ID
+                    const insertSql = 'INSERT INTO withdrawals (id, user_id, amount, method, upi_id, account_number, ifsc, status) VALUES (?, ?, ?, ?, ?, ?, ?, "PENDING")';
+                    conn.query(insertSql, [id, user_id, withdrawAmount, method, upi_id, account_number, ifsc], (err, result) => {
                         if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Insert Withdrawal Error: ' + err.message }); });
 
                         conn.commit(err => {
                             if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Commit Error: ' + err.message }); });
                             conn.release();
-                            console.log(`User ${user_id} requested withdrawal. ${withdrawAmount} deducted from wallet.`);
+                            console.log(`User ${user_id} requested withdrawal. ${withdrawAmount} deducted from wallet. ID: ${id}`);
                             res.json({ message: 'Withdrawal requested successfully. Amount deducted from wallet.', new_balance: balance - withdrawAmount });
                         });
                     });
