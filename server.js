@@ -19,11 +19,90 @@ const db = mysql.createPool({
     database: process.env.DB_NAME || 'shriram_matka'
 });
 
+// Helper to sync database schema automatically
+const syncSchema = () => {
+    const tables = [
+        `CREATE TABLE IF NOT EXISTS users (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            username VARCHAR(255) UNIQUE NOT NULL,
+            password VARCHAR(255) NOT NULL,
+            role ENUM('ADMIN', 'USER') DEFAULT 'USER',
+            balance DECIMAL(10, 2) DEFAULT 0.00,
+            is_blocked BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`,
+        `CREATE TABLE IF NOT EXISTS games (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            subtitle VARCHAR(100),
+            number VARCHAR(20) DEFAULT 'XXX-XX-XXX',
+            open_time TIME,
+            close_time TIME,
+            status ENUM('OPEN', 'CLOSED') DEFAULT 'CLOSED',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`,
+        `CREATE TABLE IF NOT EXISTS bets (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            game_name VARCHAR(100) NOT NULL,
+            game_type VARCHAR(100) NOT NULL,
+            session ENUM('OPEN', 'CLOSE') NOT NULL,
+            digit VARCHAR(100) NOT NULL,
+            points INT NOT NULL,
+            status ENUM('PENDING', 'WON', 'LOST') DEFAULT 'PENDING',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )`,
+        `CREATE TABLE IF NOT EXISTS deposits (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            amount DECIMAL(10, 2) NOT NULL,
+            status ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'PENDING',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )`,
+        `CREATE TABLE IF NOT EXISTS withdrawals (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            amount DECIMAL(10, 2) NOT NULL,
+            status ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'PENDING',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )`,
+        `CREATE TABLE IF NOT EXISTS notifications (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            message TEXT NOT NULL,
+            audience ENUM('ALL', 'USER') DEFAULT 'ALL',
+            type ENUM('INFO', 'SUCCESS', 'WARNING', 'CRITICAL') DEFAULT 'INFO',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`
+    ];
+
+    tables.forEach(sql => {
+        db.query(sql, (err) => {
+            if (err) console.error('Error creating table:', err.message);
+        });
+    });
+
+    // Handle column-level migration for is_blocked
+    db.query("SHOW COLUMNS FROM users LIKE 'is_blocked'", (err, rows) => {
+        if (!err && rows.length === 0) {
+            db.query("ALTER TABLE users ADD COLUMN is_blocked BOOLEAN DEFAULT FALSE", (err) => {
+                if (err) console.error("Could not add is_blocked column:", err.message);
+                else console.log("Added is_blocked column to users table.");
+            });
+        }
+    });
+};
+
 db.getConnection((err, connection) => {
     if (err) {
         console.error('Database connection failed:', err);
     } else {
         console.log('Connected to MySQL Database.');
+        syncSchema();
+        seedGames();
         connection.release();
     }
 });
@@ -313,11 +392,17 @@ app.get('/api/users/:id/sync', (req, res) => {
     const betsSql = 'SELECT * FROM bets WHERE user_id = ? ORDER BY created_at DESC LIMIT 50';
 
     db.query(userSql, [id], (err, userRes) => {
-        if (err) return res.status(500).json({ error: err.message });
+        if (err) {
+            console.error("Sync user error:", err.message);
+            return res.status(500).json({ error: 'Sync User Error: ' + err.message });
+        }
         if (userRes.length === 0) return res.status(404).json({ error: 'User not found' });
 
         db.query(betsSql, [id], (err, betsRes) => {
-            if (err) return res.status(500).json({ error: err.message });
+            if (err) {
+                console.error("Sync bets error:", err.message);
+                return res.status(500).json({ error: 'Sync Bets Error: ' + err.message });
+            }
             res.json({
                 balance: userRes[0].balance,
                 is_blocked: userRes[0].is_blocked,
@@ -332,11 +417,11 @@ app.post('/api/bets', (req, res) => {
     const { user_id, game_name, game_type, session, digit, points } = req.body;
 
     db.beginTransaction(err => {
-        if (err) return res.status(500).json({ error: err.message });
+        if (err) return res.status(500).json({ error: 'Trans Begin Error: ' + err.message });
 
         // 1. Check Balance
         db.query('SELECT balance FROM users WHERE id = ?', [user_id], (err, results) => {
-            if (err) return db.rollback(() => res.status(500).json({ error: err.message }));
+            if (err) return db.rollback(() => res.status(500).json({ error: 'Check Bal Error: ' + err.message }));
             if (results.length === 0) return db.rollback(() => res.status(404).json({ error: 'User not found' }));
 
             const balance = results[0].balance;
@@ -344,15 +429,15 @@ app.post('/api/bets', (req, res) => {
 
             // 2. Subtract Balance
             db.query('UPDATE users SET balance = balance - ? WHERE id = ?', [points, user_id], (err, results) => {
-                if (err) return db.rollback(() => res.status(500).json({ error: err.message }));
+                if (err) return db.rollback(() => res.status(500).json({ error: 'Update Bal Error: ' + err.message }));
 
                 // 3. Insert Bet
                 const betSql = 'INSERT INTO bets (user_id, game_name, game_type, session, digit, points, status) VALUES (?, ?, ?, ?, ?, ?, "PENDING")';
                 db.query(betSql, [user_id, game_name, game_type, session, digit, points], (err, results) => {
-                    if (err) return db.rollback(() => res.status(500).json({ error: err.message }));
+                    if (err) return db.rollback(() => res.status(500).json({ error: 'Insert Bet Error: ' + err.message }));
 
                     db.commit(err => {
-                        if (err) return db.rollback(() => res.status(500).json({ error: err.message }));
+                        if (err) return db.rollback(() => res.status(500).json({ error: 'Commit Error: ' + err.message }));
                         res.json({ message: 'Bet placed successfully', balance: balance - points });
                     });
                 });
