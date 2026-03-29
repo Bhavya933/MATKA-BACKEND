@@ -314,8 +314,8 @@ const settleBets = (game_name, inputNumber, callback) => {
     const number = (inputNumber || 'XXX-XX-XXX').toUpperCase();
     console.log(`🎯 Settling bets for ${game_name} with result ${number}`);
 
-    // MUST match Database ENUM: 'Placed'
-    const query = 'SELECT * FROM bets WHERE TRIM(game_name) = ? AND status = "Placed"';
+    // MUST match Database values: 'Placed' or 'PENDING'
+    const query = 'SELECT * FROM bets WHERE TRIM(game_name) = ? AND (status = "Placed" OR status = "PENDING" OR status = "pending")';
     db.query(query, [game_name.trim()], (err, pendingBets) => {
         if (err) {
             console.error("Fetch pending bets error:", err.message);
