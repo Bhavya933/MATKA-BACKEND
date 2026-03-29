@@ -338,7 +338,8 @@ const settleBets = (game_name, inputNumber, callback) => {
     console.log(`🎯 Settling bets for ${game_name} with result ${number}`);
 
     // Robust Catch-all query for PENDING or Placed
-    const query = 'SELECT * FROM bets WHERE TRIM(game_name) = ? AND (status = "Placed" OR UPPER(status) = "PENDING") AND payoutDone = 0';
+    // Robust Catch-all query for PENDING or Placed or incorrectly LOST bets
+    const query = 'SELECT * FROM bets WHERE TRIM(game_name) = ? AND (status = "Placed" OR UPPER(status) = "PENDING" OR UPPER(status) = "LOST") AND payoutDone = 0';
     db.query(query, [game_name.trim()], (err, pendingBets) => {
         if (err) {
             console.error("Fetch pending bets error:", err.message);
@@ -348,9 +349,14 @@ const settleBets = (game_name, inputNumber, callback) => {
 
         if (!pendingBets || pendingBets.length === 0) {
             console.log(`No pending bets found for ${game_name}.`);
+            // Even if no bets to settle, update the result_number for everyone else to keep history consistent
+            db.query('UPDATE bets SET result_number = ? WHERE TRIM(game_name) = ?', [number, game_name.trim()]);
             if (callback) callback({ message: 'No bets to settle' });
             return;
         }
+
+        // Broad update to ensure everyone (even already settled) sees the latest format
+        db.query('UPDATE bets SET result_number = ? WHERE TRIM(game_name) = ?', [number, game_name.trim()]);
 
         const parts = (number || '').split('-');
         let openPanna = 'XXX', jodi = 'XX', closePanna = 'XXX';
