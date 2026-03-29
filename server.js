@@ -385,21 +385,46 @@ app.put("/api/deposits/:id/status", (req, res) => {
     return res.status(400).json({ error: "Status is required" });
   }
 
-  const query = "UPDATE deposits SET status = ? WHERE id = ?";
-
-  db.query(query, [status, id], (err, result) => {
+  db.beginTransaction(err => {
     if (err) {
-      console.error("SQL ERROR:", err); // 🔥 THIS WILL SHOW REAL ISSUE
-      return res.status(500).json({ error: err.message });
+      console.error("Trans Begin Error:", err);
+      return res.status(500).json({ error: 'Transaction Begin Error: ' + err.message });
     }
 
-    console.log("RESULT:", result);
+    // 1. Get deposit info before anything
+    db.query('SELECT user_id, amount, status FROM deposits WHERE id = ?', [id], (err, results) => {
+      if (err) return db.rollback(() => res.status(500).json({ error: 'Fetch Deposit Error: ' + err.message }));
+      if (results.length === 0) return db.rollback(() => res.status(404).json({ error: 'Deposit not found' }));
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: "Deposit not found" });
-    }
+      const deposit = results[0];
+      if (deposit.status !== 'PENDING') return db.rollback(() => res.status(400).json({ error: 'Deposit is ' + deposit.status + ', cannot change.' }));
 
-    res.json({ message: "Status updated successfully ✅" });
+      // 2. Update status
+      const updateStatusSql = "UPDATE deposits SET status = ? WHERE id = ?";
+      db.query(updateStatusSql, [status, id], (err, updateRes) => {
+        if (err) return db.rollback(() => res.status(500).json({ error: 'Status Update Error: ' + err.message }));
+
+        // 3. If APPROVED, Add Balance to User
+        if (status === 'APPROVED') {
+          const amount = parseFloat(deposit.amount);
+          db.query('UPDATE users SET balance = balance + ? WHERE id = ?', [amount, deposit.user_id], (err, userRes) => {
+            if (err) return db.rollback(() => res.status(500).json({ error: 'Balance Update Error: ' + err.message }));
+            
+            db.commit(err => {
+              if (err) return db.rollback(() => res.status(500).json({ error: 'Commit Error: ' + err.message }));
+              console.log(`Successfully approved deposit ${id} for user ${deposit.user_id}. Amount added: ${amount}`);
+              res.json({ message: "Status updated and balance added successfully ✅" });
+            });
+          });
+        } else {
+          db.commit(err => {
+            if (err) return db.rollback(() => res.status(500).json({ error: 'Commit Error: ' + err.message }));
+            console.log(`Successfully rejected deposit ${id}`);
+            res.json({ message: "Deposit rejected successfully ✅" });
+          });
+        }
+      });
+    });
   });
 });
 
