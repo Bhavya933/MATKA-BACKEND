@@ -393,16 +393,16 @@ const settleBets = (game_name, inputNumber, callback) => {
                 outcome = 'PENDING';
             }
 
-            if (outcome === 'WON') {
+            if (outcome === 'Won') {
                 const winAmount = bet.points * multiplier;
                 db.query('UPDATE users SET balance = balance + ? WHERE mobile = ?', [winAmount, bet.user_mobile], (err) => {
                     if (err) console.error("Balance update failed:", err.message);
-                    db.query('UPDATE bets SET status = "WON", result_number = ?, payoutDone = 1 WHERE id = ?', [number, bet.id], (err) => {
+                    db.query('UPDATE bets SET status = "Won", result_number = ?, payoutDone = 1 WHERE id = ?', [number, bet.id], (err) => {
                         processNext();
                     });
                 });
-            } else if (outcome === 'LOST') {
-                db.query('UPDATE bets SET status = "LOST", result_number = ? WHERE id = ?', [number, bet.id], (err) => {
+            } else if (outcome === 'Lost') {
+                db.query('UPDATE bets SET status = "Lost", result_number = ? WHERE id = ?', [number, bet.id], (err) => {
                     processNext();
                 });
             } else {
