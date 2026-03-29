@@ -355,38 +355,38 @@ const settleBets = (game_name, inputNumber, callback) => {
             try {
                 if (bet.game_type === 'Single Digit') {
                     multiplier = 9.5;
-                    if (bet.session === 'OPEN' && isOpenDeclared) outcome = (betNumber === openDigit) ? 'WON' : 'LOST';
-                    else if (bet.session === 'CLOSE' && isCloseDeclared) outcome = (betNumber === closeDigit) ? 'WON' : 'LOST';
+                    if (bet.session === 'OPEN' && isOpenDeclared) outcome = (betNumber === openDigit) ? 'Won' : 'Lost';
+                    else if (bet.session === 'CLOSE' && isCloseDeclared) outcome = (betNumber === closeDigit) ? 'Won' : 'Lost';
                 } else if (bet.game_type === 'Double Digit (Jodi)') {
                     multiplier = 95;
-                    if (isJodiDeclared) outcome = (betNumber === jodi) ? 'WON' : 'LOST';
+                    if (isJodiDeclared) outcome = (betNumber === jodi) ? 'Won' : 'Lost';
                 } else if (bet.game_type === 'Single Panna') {
                     multiplier = 156;
-                    if (bet.session === 'OPEN' && isOpenDeclared) outcome = (betNumber === openPanna) ? 'WON' : 'LOST';
-                    else if (bet.session === 'CLOSE' && isCloseDeclared) outcome = (betNumber === closePanna) ? 'WON' : 'LOST';
+                    if (bet.session === 'OPEN' && isOpenDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
+                    else if (bet.session === 'CLOSE' && isCloseDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
                 } else if (bet.game_type === 'Double Panna') {
                     multiplier = 320;
-                    if (bet.session === 'OPEN' && isOpenDeclared) outcome = (betNumber === openPanna) ? 'WON' : 'LOST';
-                    else if (bet.session === 'CLOSE' && isCloseDeclared) outcome = (betNumber === closePanna) ? 'WON' : 'LOST';
+                    if (bet.session === 'OPEN' && isOpenDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
+                    else if (bet.session === 'CLOSE' && isCloseDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
                 } else if (bet.game_type === 'Triple Panna') {
                     multiplier = 800;
-                    if (bet.session === 'OPEN' && isOpenDeclared) outcome = (betNumber === openPanna) ? 'WON' : 'LOST';
-                    else if (bet.session === 'CLOSE' && isCloseDeclared) outcome = (betNumber === closePanna) ? 'WON' : 'LOST';
+                    if (bet.session === 'OPEN' && isOpenDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
+                    else if (bet.session === 'CLOSE' && isCloseDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
                 } else if (bet.game_type === 'Half Sangam') {
                     multiplier = 1000;
                     const bParts = betNumber.split(/[x×]/);
                     if (bParts.length >= 2) {
                         if (bet.session === 'OPEN' && isOpenDeclared && isCloseDeclared) {
-                           outcome = (bParts[0].trim() === openPanna && bParts[1].trim() === closeDigit) ? 'WON' : 'LOST';
+                           outcome = (bParts[0].trim() === openPanna && bParts[1].trim() === closeDigit) ? 'Won' : 'Lost';
                         } else if (bet.session === 'CLOSE' && isOpenDeclared && isCloseDeclared) {
-                           outcome = (bParts[0].trim() === closePanna && bParts[1].trim() === openDigit) ? 'WON' : 'LOST';
+                           outcome = (bParts[0].trim() === closePanna && bParts[1].trim() === openDigit) ? 'Won' : 'Lost';
                         }
                     }
                 } else if (bet.game_type === 'Full Sangam') {
                     multiplier = 10000;
                     const bParts = betNumber.split(/[x×]/);
                     if (bParts.length >= 2 && isOpenDeclared && isCloseDeclared) {
-                        outcome = (bParts[0].trim() === openPanna && bParts[1].trim() === closePanna) ? 'WON' : 'LOST';
+                        outcome = (bParts[0].trim() === openPanna && bParts[1].trim() === closePanna) ? 'Won' : 'Lost';
                     }
                 }
             } catch (calcErr) {
