@@ -58,6 +58,8 @@ const syncSchema = () => {
             user_id INT NOT NULL,
             amount DECIMAL(10, 2) NOT NULL,
             status ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'PENDING',
+            method VARCHAR(50) DEFAULT 'GPAY',
+            utr_id VARCHAR(100),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )`,
@@ -91,6 +93,15 @@ const syncSchema = () => {
             db.query("ALTER TABLE users ADD COLUMN is_blocked BOOLEAN DEFAULT FALSE", (err) => {
                 if (err) console.error("Could not add is_blocked column:", err.message);
                 else console.log("Added is_blocked column to users table.");
+            });
+        }
+    });
+
+    // Handle deposits schema migration
+    db.query("SHOW COLUMNS FROM deposits LIKE 'method'", (err, rows) => {
+        if (!err && rows.length === 0) {
+            db.query("ALTER TABLE deposits ADD COLUMN method VARCHAR(50) DEFAULT 'GPAY', ADD COLUMN utr_id VARCHAR(100)", (err) => {
+                if (!err) console.log("Updated deposits table schema (Added method and utr_id columns).");
             });
         }
     });
@@ -334,11 +345,14 @@ app.get('/api/deposits', (req, res) => {
 
 // Create deposit request (User)
 app.post('/api/deposits', (req, res) => {
-    const { id, user_id, amount, method, utr_id } = req.body;
-    const sql = 'INSERT INTO deposits (id, user_id, amount, method, utr_id) VALUES (?, ?, ?, ?, ?)';
-    db.query(sql, [id, user_id, amount, method, utr_id], (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ message: 'Deposit request submitted', id });
+    const { user_id, amount, method, utr_id } = req.body;
+    const sql = 'INSERT INTO deposits (user_id, amount, method, utr_id, status) VALUES (?, ?, ?, ?, "PENDING")';
+    db.query(sql, [user_id, amount, method, utr_id], (err, results) => {
+        if (err) {
+            console.error("Deposit submission error:", err.message);
+            return res.status(500).json({ error: 'Deposit Error: ' + err.message });
+        }
+        res.json({ message: 'Deposit request submitted', insertId: results.insertId });
     });
 });
 
