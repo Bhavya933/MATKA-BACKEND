@@ -306,20 +306,21 @@ app.put('/api/deposits/:id/status', (req, res) => {
 
 // --- BETTING ENDPOINTS ---
 
-// Fetch User Data (Balance + Bets) - For AUTO SYNC
+// Fetch User Data (Balance + Bets + Block Status) - For AUTO SYNC
 app.get('/api/users/:id/sync', (req, res) => {
     const { id } = req.params;
-    const balanceSql = 'SELECT balance FROM users WHERE id = ?';
+    const userSql = 'SELECT balance, is_blocked FROM users WHERE id = ?';
     const betsSql = 'SELECT * FROM bets WHERE user_id = ? ORDER BY created_at DESC LIMIT 50';
 
-    db.query(balanceSql, [id], (err, balanceRes) => {
+    db.query(userSql, [id], (err, userRes) => {
         if (err) return res.status(500).json({ error: err.message });
-        if (balanceRes.length === 0) return res.status(404).json({ error: 'User not found' });
+        if (userRes.length === 0) return res.status(404).json({ error: 'User not found' });
 
         db.query(betsSql, [id], (err, betsRes) => {
             if (err) return res.status(500).json({ error: err.message });
             res.json({
-                balance: balanceRes[0].balance,
+                balance: userRes[0].balance,
+                is_blocked: userRes[0].is_blocked,
                 bets: betsRes
             });
         });
