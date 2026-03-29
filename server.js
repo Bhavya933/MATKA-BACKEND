@@ -30,6 +30,23 @@ const db = mysql.createPool({
     database: process.env.DB_NAME || 'shriram_matka'
 });
 
+// --- MIDNIGHT RESET ENGINE ---
+const resetGamesForNewDay = () => {
+    console.log("🕛 MIDNIGHT RESET: Clearing all games for the new day...");
+    db.query("UPDATE games SET number = 'XXX-XX-XXX', status = 'OPEN'", (err) => {
+        if (err) console.error("Midnight reset failed:", err.message);
+        else console.log("✅ All games reset to OPEN.");
+    });
+};
+
+// Check every minute if it's 12:00 AM
+setInterval(() => {
+    const now = new Date();
+    if (now.getHours() === 0 && now.getMinutes() === 0) {
+        resetGamesForNewDay();
+    }
+}, 60000); 
+
 // Helper to sync database schema automatically
 const syncSchema = () => {
     const tables = [
