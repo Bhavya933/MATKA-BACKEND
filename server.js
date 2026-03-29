@@ -35,11 +35,13 @@ const syncSchema = () => {
     const tables = [
         `CREATE TABLE IF NOT EXISTS users (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            username VARCHAR(255) UNIQUE NOT NULL,
+            name VARCHAR(255),
+            mobile VARCHAR(15) UNIQUE NOT NULL,
             password VARCHAR(255) NOT NULL,
-            role ENUM('ADMIN', 'USER') DEFAULT 'USER',
-            balance DECIMAL(10, 2) DEFAULT 0.00,
-            is_blocked BOOLEAN DEFAULT FALSE,
+            isAdmin TINYINT(1) DEFAULT 0,
+            balance DECIMAL(15, 2) DEFAULT 0.00,
+            isBlocked TINYINT(1) DEFAULT 0,
+            is_blocked TINYINT(1) DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )`,
         `CREATE TABLE IF NOT EXISTS games (
@@ -54,15 +56,14 @@ const syncSchema = () => {
         )`,
         `CREATE TABLE IF NOT EXISTS bets (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            user_id INT NOT NULL,
-            game_name VARCHAR(100) NOT NULL,
+            user_mobile VARCHAR(15) NOT NULL,
+            game_name VARCHAR(255) NOT NULL,
             game_type VARCHAR(100) NOT NULL,
             session ENUM('OPEN', 'CLOSE') NOT NULL,
-            digit VARCHAR(100) NOT NULL,
+            number VARCHAR(100) NOT NULL,
             points INT NOT NULL,
             status ENUM('Placed', 'Won', 'Lost') DEFAULT 'Placed',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )`,
         `CREATE TABLE IF NOT EXISTS deposits (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -116,12 +117,99 @@ const syncSchema = () => {
         });
     });
 
+    // Handle column migrations for users (username -> mobile, name, isAdmin)
+    db.query("SHOW COLUMNS FROM users LIKE 'mobile'", (err, rows) => {
+        if (!err && rows.length === 0) {
+            // Check if username exists to rename it, else just add mobile
+            db.query("SHOW COLUMNS FROM users LIKE 'username'", (err, uRows) => {
+                if (!err && uRows.length > 0) {
+                    console.log("Renaming username to mobile...");
+                    db.query("ALTER TABLE users CHANGE username mobile VARCHAR(15) UNIQUE NOT NULL", (err) => {
+                        if (err) console.error("Rename Error:", err.message);
+                    });
+                } else {
+                    console.log("Adding mobile column to users...");
+                    db.query("ALTER TABLE users ADD COLUMN mobile VARCHAR(15) UNIQUE NOT NULL", (err) => {
+                        if (err) console.error("Add Column Error:", err.message);
+                    });
+                }
+            });
+        }
+    });
+
+    db.query("SHOW COLUMNS FROM users LIKE 'name'", (err, rows) => {
+        if (!err && rows.length === 0) {
+            db.query("ALTER TABLE users ADD COLUMN name VARCHAR(255)", (err) => {
+                if (err) console.error("Add name column error:", err.message);
+            });
+        }
+    });
+
+    db.query("SHOW COLUMNS FROM users LIKE 'isAdmin'", (err, rows) => {
+        if (!err && rows.length === 0) {
+            db.query("ALTER TABLE users ADD COLUMN isAdmin TINYINT(1) DEFAULT 0", (err) => {
+                if (err) console.error("Add isAdmin column error:", err.message);
+            });
+        }
+    });
+
+    // Migration for bets table (user_id -> user_mobile)
+    db.query("SHOW COLUMNS FROM bets LIKE 'user_mobile'", (err, rows) => {
+        if (!err && rows.length === 0) {
+            console.log("No 'user_mobile' column in 'bets', checking for 'user_id'...");
+            db.query("SHOW COLUMNS FROM bets LIKE 'user_id'", (err, uRows) => {
+                if (!err && uRows.length > 0) {
+                    console.log("Adding user_mobile column and migrating data from user_id...");
+                    // Add column first
+                    db.query("ALTER TABLE bets ADD COLUMN user_mobile VARCHAR(15)", (err) => {
+                        if (err) {
+                            console.error("Add user_mobile Error:", err.message);
+                        } else {
+                            // Update values from users table
+                            db.query("UPDATE bets b JOIN users u ON b.user_id = u.id SET b.user_mobile = u.mobile", (err) => {
+                                if (err) console.error("Data Migration Error:", err.message);
+                                else console.log("Successfully migrated user IDs to mobile numbers in bets table.");
+                            });
+                        }
+                    });
+                } else {
+                    console.log("Adding user_mobile column (no user_id found)...");
+                    db.query("ALTER TABLE bets ADD COLUMN user_mobile VARCHAR(15) NOT NULL", (err) => {
+                        if (err) console.error("Add user_mobile Error:", err.message);
+                    });
+                }
+            });
+        }
+    });
+
+    // Ensure digit column is named 'number' if it exists as digit (legacy support)
+    db.query("SHOW COLUMNS FROM bets LIKE 'number'", (err, rows) => {
+        if (!err && rows.length === 0) {
+            db.query("SHOW COLUMNS FROM bets LIKE 'digit'", (err, dRows) => {
+                if (!err && dRows.length > 0) {
+                    db.query("ALTER TABLE bets CHANGE digit number VARCHAR(100) NOT NULL", (err) => {
+                        if (err) console.error("Rename digit to number Error:", err.message);
+                    });
+                }
+            });
+        }
+    });
+
     // Handle column-level migration for is_blocked
     db.query("SHOW COLUMNS FROM users LIKE 'is_blocked'", (err, rows) => {
         if (!err && rows.length === 0) {
             db.query("ALTER TABLE users ADD COLUMN is_blocked BOOLEAN DEFAULT FALSE", (err) => {
                 if (err) console.error("Could not add is_blocked column:", err.message);
                 else console.log("Added is_blocked column to users table.");
+            });
+        }
+    });
+
+    // Handle isBlocked (for dashboard compat)
+    db.query("SHOW COLUMNS FROM users LIKE 'isBlocked'", (err, rows) => {
+        if (!err && rows.length === 0) {
+            db.query("ALTER TABLE users ADD COLUMN isBlocked TINYINT(1) DEFAULT 0", (err) => {
+                if (err) console.error("Could not add isBlocked column:", err.message);
             });
         }
     });
@@ -144,6 +232,11 @@ const syncSchema = () => {
                 if (!err) console.log("Updated deposits table schema (Added method and utr_id columns).");
             });
         }
+    });
+
+    // Update balance column precision
+    db.query("ALTER TABLE users MODIFY COLUMN balance DECIMAL(15, 2) DEFAULT 0.00", (err) => {
+        if (err) console.error("Balance precision update error:", err.message);
     });
 };
 
@@ -192,8 +285,8 @@ const settleBets = (game_name, inputNumber, callback) => {
             
             if (bet.game_type === 'Single Digit') {
                 multiplier = 10;
-                if (bet.session === 'OPEN' && openDigit !== 'X') outcome = (betNumber === openDigit) ? 'Won' : 'Lost';
-                else if (bet.session === 'CLOSE' && closeDigit !== 'X') outcome = (betNumber === closeDigit) ? 'Won' : 'Lost';
+                if (bet.session === 'OPEN' && openDigit !== 'X') outcome = (betNumber === openDigit) ? 'WON' : 'LOST';
+                else if (bet.session === 'CLOSE' && closeDigit !== 'X') outcome = (betNumber === closeDigit) ? 'WON' : 'LOST';
             } else if (bet.game_type === 'Double Digit (Jodi)') {
                 multiplier = 100;
                 if (isJodiDeclared) outcome = (betNumber === jodi) ? 'Won' : 'Lost';
