@@ -304,6 +304,133 @@ app.put('/api/deposits/:id/status', (req, res) => {
     });
 });
 
+// --- BETTING ENDPOINTS ---
+
+// Fetch User Data (Balance + Bets) - For AUTO SYNC
+app.get('/api/users/:id/sync', (req, res) => {
+    const { id } = req.params;
+    const balanceSql = 'SELECT balance FROM users WHERE id = ?';
+    const betsSql = 'SELECT * FROM bets WHERE user_id = ? ORDER BY created_at DESC LIMIT 50';
+
+    db.query(balanceSql, [id], (err, balanceRes) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (balanceRes.length === 0) return res.status(404).json({ error: 'User not found' });
+
+        db.query(betsSql, [id], (err, betsRes) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({
+                balance: balanceRes[0].balance,
+                bets: betsRes
+            });
+        });
+    });
+});
+
+// Place Bet (User)
+app.post('/api/bets', (req, res) => {
+    const { user_id, game_name, game_type, session, digit, points } = req.body;
+
+    db.beginTransaction(err => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        // 1. Check Balance
+        db.query('SELECT balance FROM users WHERE id = ?', [user_id], (err, results) => {
+            if (err) return db.rollback(() => res.status(500).json({ error: err.message }));
+            if (results.length === 0) return db.rollback(() => res.status(404).json({ error: 'User not found' }));
+
+            const balance = results[0].balance;
+            if (balance < points) return db.rollback(() => res.status(400).json({ error: 'Insufficient Balance' }));
+
+            // 2. Subtract Balance
+            db.query('UPDATE users SET balance = balance - ? WHERE id = ?', [points, user_id], (err, results) => {
+                if (err) return db.rollback(() => res.status(500).json({ error: err.message }));
+
+                // 3. Insert Bet
+                const betSql = 'INSERT INTO bets (user_id, game_name, game_type, session, digit, points, status) VALUES (?, ?, ?, ?, ?, ?, "PENDING")';
+                db.query(betSql, [user_id, game_name, game_type, session, digit, points], (err, results) => {
+                    if (err) return db.rollback(() => res.status(500).json({ error: err.message }));
+
+                    db.commit(err => {
+                        if (err) return db.rollback(() => res.status(500).json({ error: err.message }));
+                        res.json({ message: 'Bet placed successfully', balance: balance - points });
+                    });
+                });
+            });
+        });
+    });
+});
+
+// Declare Result and Payout Winners (Admin)
+app.post('/api/declare-result', (req, res) => {
+    const { game_name, number } = req.body; // e.g., 'ANDHRA DAY', '100-10-100'
+
+    // 1. Update Game Outcome in games table
+    db.query('UPDATE games SET number = ? WHERE name = ?', [number, game_name], (err, results) => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        // 2. Fetch all PENDING bets for this game
+        db.query('SELECT * FROM bets WHERE game_name = ? AND status = "PENDING"', [game_name], (err, bets) => {
+            if (err) return res.status(500).json({ error: err.message });
+
+            if (bets.length === 0) return res.json({ message: 'Result declared, no bets to settle.' });
+
+            // Helper to determine Win/Loss (Simplified logic matching App.jsx)
+            const parts = number.split('-');
+            const openPanna = parts[0];
+            const jodi = parts[1];
+            const closePanna = parts[2];
+            const openDigit = jodi[0];
+            const closeDigit = jodi[1];
+
+            let winnersCount = 0;
+
+            // Process each bet
+            const processBet = (index) => {
+                if (index === bets.length) {
+                    return res.json({ message: `Result declared! Processed ${bets.length} bets, Found ${winnersCount} winners.` });
+                }
+
+                const bet = bets[index];
+                let outcome = 'LOST';
+                let multiplier = 9;
+
+                if (bet.game_type === 'Single Digit') {
+                    if (bet.session === 'OPEN' && bet.digit === openDigit) outcome = 'WON';
+                    if (bet.session === 'CLOSE' && bet.digit === closeDigit) outcome = 'WON';
+                } else if (bet.game_type === 'Double Digit (Jodi)') {
+                    if (bet.digit === jodi) outcome = 'WON';
+                } else if (bet.game_type.includes('Panna')) {
+                    multiplier = 140;
+                    if (bet.session === 'OPEN' && bet.digit === openPanna) outcome = 'WON';
+                    if (bet.session === 'CLOSE' && bet.digit === closePanna) outcome = 'WON';
+                } else if (bet.game_type === 'Full Sangam') {
+                    multiplier = 1000;
+                    const bParts = bet.digit.split(/[x×]/);
+                    if (bParts[0].trim() === openPanna && bParts[1].trim() === closePanna) outcome = 'WON';
+                }
+
+                if (outcome === 'WON') {
+                    winnersCount++;
+                    const winAmount = bet.points * multiplier;
+                    // Update user balance + Mark bet WON
+                    db.query('UPDATE users SET balance = balance + ? WHERE id = ?', [winAmount, bet.user_id], () => {
+                        db.query('UPDATE bets SET status = "WON" WHERE id = ?', [bet.id], () => {
+                            processBet(index + 1);
+                        });
+                    });
+                } else {
+                    // Mark bet LOST
+                    db.query('UPDATE bets SET status = "LOST" WHERE id = ?', [bet.id], () => {
+                        processBet(index + 1);
+                    });
+                }
+            };
+
+            processBet(0);
+        });
+    });
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
