@@ -163,6 +163,22 @@ const syncSchema = () => {
         }
     });
 
+    // --- REPAIR OLD HISTORY AUTOMATICALLY ---
+    const repairOldBets = () => {
+        console.log("🛠️ Starting History Repair...");
+        db.query("SELECT name, number FROM games WHERE number != 'XXX-XX-XXX'", (err, games) => {
+            if (!err && games.length > 0) {
+                games.forEach(g => {
+                    console.log(`Checking history for: ${g.name} (${g.number})`);
+                    settleBets(g.name, g.number);
+                });
+            }
+        });
+    };
+
+    // Run repair once everything is ready
+    setTimeout(repairOldBets, 5000); 
+
     db.query("SHOW COLUMNS FROM users LIKE 'isAdmin'", (err, rows) => {
         if (!err && rows.length === 0) {
             db.query("ALTER TABLE users ADD COLUMN isAdmin TINYINT(1) DEFAULT 0", (err) => {
@@ -626,18 +642,15 @@ app.put('/api/games/:id', (req, res) => {
     const { name, number, open_time, close_time, status } = req.body;
     const query = 'UPDATE games SET name = ?, number = ?, open_time = ?, close_time = ?, status = ? WHERE id = ?';
     db.query(query, [name, number, open_time, close_time, status, id], (err, result) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
+        if (err) return res.status(500).json({ error: 'Database error: ' + err.message });
         
         // AUTO-FINALIZE: Automatically settle bets when number is updated
-        if (number) {
+        if (number && number !== 'XXX-XX-XXX') {
             settleBets(name, number, (settleRes) => {
-                console.log(`Auto-settled bets for ${name}:`, settleRes.message);
-                // We still return success for the game update even if settlement had no bets
-                res.json({ message: 'Game updated and bets auto-finalized successfully' });
+                console.log(`Auto-settled bets for ${name}:`, settleRes ? settleRes.message : 'Done');
             });
-        } else {
-            res.json({ message: 'Game updated successfully' });
         }
+        res.json({ message: 'Game updated successfully' });
     });
 });
 
