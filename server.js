@@ -35,7 +35,6 @@ const syncSchema = () => {
     const tables = [
         `CREATE TABLE IF NOT EXISTS users (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            name VARCHAR(255),
             mobile VARCHAR(15) UNIQUE NOT NULL,
             password VARCHAR(255) NOT NULL,
             isAdmin TINYINT(1) DEFAULT 0,
@@ -117,7 +116,17 @@ const syncSchema = () => {
         });
     });
 
-    // Handle column migrations for users (username -> mobile, name, isAdmin)
+    // Remove the unused and empty 'name' column as requested
+    db.query("SHOW COLUMNS FROM users LIKE 'name'", (err, rows) => {
+        if (!err && rows.length > 0) {
+            console.log("Dropping unused 'name' column...");
+            db.query("ALTER TABLE users DROP COLUMN name", (err) => {
+                if (err) console.error("Error dropping name column:", err.message);
+            });
+        }
+    });
+
+    // Handle column migrations for users (username -> mobile, isAdmin)
     db.query("SHOW COLUMNS FROM users LIKE 'mobile'", (err, rows) => {
         if (!err && rows.length === 0) {
             // Check if username exists to rename it, else just add mobile
@@ -133,14 +142,6 @@ const syncSchema = () => {
                         if (err) console.error("Add Column Error:", err.message);
                     });
                 }
-            });
-        }
-    });
-
-    db.query("SHOW COLUMNS FROM users LIKE 'name'", (err, rows) => {
-        if (!err && rows.length === 0) {
-            db.query("ALTER TABLE users ADD COLUMN name VARCHAR(255)", (err) => {
-                if (err) console.error("Add name column error:", err.message);
             });
         }
     });
@@ -364,7 +365,7 @@ app.post('/api/signup', (req, res) => {
 app.post('/api/login', (req, res) => {
     const { mobile, password } = req.body;
     const query = `
-      SELECT id, name, mobile, balance, isAdmin as role, isBlocked as is_blocked 
+      SELECT id, mobile, mobile as name, balance, isAdmin as role, isBlocked as is_blocked 
       FROM users 
       WHERE mobile = ? AND password = ?
     `;
@@ -637,7 +638,7 @@ app.get('/api/users/:id/balance', (req, res) => {
 
 // Admin: Get all users
 app.get('/api/users', (req, res) => {
-    const query = 'SELECT id, name, mobile, balance, isBlocked as is_blocked, created_at FROM users WHERE isAdmin = 0 ORDER BY created_at DESC';
+    const query = 'SELECT id, mobile as name, mobile, balance, is_blocked, created_at FROM users WHERE isAdmin = 0 ORDER BY created_at DESC';
     db.query(query, (err, results) => {
         if (err) return res.status(500).json({ error: 'Database error' });
         res.json(results);
@@ -860,8 +861,8 @@ app.post('/api/bets', (req, res) => {
                 conn.query('UPDATE users SET balance = balance - ? WHERE mobile = ?', [points, user_mobile], (err, results) => {
                     if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Update Bal Error: ' + err.message }); });
 
-                    // 3. Insert Bet
-                    const betSql = 'INSERT INTO bets (user_id, user_mobile, game_name, game_type, session, number, points, status) VALUES (?, ?, ?, ?, ?, ?, ?, "Placed")';
+                    // 3. Insert Bet - Using the correct database ENUM values (PENDING, WON, LOST)
+                    const betSql = 'INSERT INTO bets (user_id, user_mobile, game_name, game_type, session, number, points, status) VALUES (?, ?, ?, ?, ?, ?, ?, "PENDING")';
                     conn.query(betSql, [userId, user_mobile, game_name, game_type, session, number, points], (err, results) => {
                         if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Insert Bet Error: ' + err.message }); });
 
