@@ -11,6 +11,17 @@ app.get("/", (req, res) => {
   res.send("API is running 🚀");
 });
 
+// Process-level error catching
+process.on('uncaughtException', (err) => {
+    console.error('UNCAUGHT EXCEPTION! 💥 Shutting down...');
+    console.error(err.name, err.message, err.stack);
+});
+
+process.on('unhandledRejection', (err) => {
+    console.error('UNHANDLED REJECTION! 💥 Shutting down...');
+    console.error(err);
+});
+
 // MySQL Connection
 const db = mysql.createPool({
     host: process.env.DB_HOST || 'localhost',
@@ -276,6 +287,7 @@ app.put('/api/games/:id', (req, res) => {
     const query = 'UPDATE games SET name = ?, number = ?, open_time = ?, close_time = ?, status = ? WHERE id = ?';
     db.query(query, [name, number, open_time, close_time, status, id], (err, result) => {
         if (err) return res.status(500).json({ error: 'Database error' });
+        
         res.json({ message: 'Game updated successfully' });
     });
 });
@@ -540,6 +552,16 @@ app.post('/api/declare-result', (req, res) => {
 
             processBet(0);
         });
+    });
+});
+
+// Global Error Handler (MUST BE AT THE BOTTOM)
+app.use((err, req, res, next) => {
+    console.error("ERROR 💥:", err);
+    res.status(500).json({ 
+        error: "Internal Server Error", 
+        message: err.message,
+        details: err.code || 'No code'
     });
 });
 
