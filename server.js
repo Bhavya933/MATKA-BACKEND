@@ -290,53 +290,33 @@ db.getConnection((err, connection) => {
 // =======================
 // BET SETTLEMENT HELPER (For Auto-Finalize)
 // =======================
+// THE ROBUST BET SETTLEMENT ENGINE
 const settleBets = (game_name, inputNumber, callback) => {
     const number = (inputNumber || 'XXX-XX-XXX').toUpperCase();
-    
-    if (number === 'XXX-XX-XXX' || !/[0-9]/.test(number)) {
-        return callback ? callback({ message: 'Result not yet declared. Skipping settlement.' }) : null;
-    }
+    console.log(`🎯 Settling bets for ${game_name} with result ${number}`);
 
-    db.query('SELECT * FROM bets WHERE game_name = ? AND status = "PENDING"', [game_name], (err, bets) => {
-        if (err) return callback ? callback({ error: err.message }) : null;
-        if (bets.length === 0) return callback ? callback({ message: 'No pending bets for this game.' }) : null;
+    const query = 'SELECT * FROM bets WHERE game_name = ? AND (status = "PENDING" OR status = "Placed" OR status = "pending")';
+    db.query(query, [game_name], (err, pendingBets) => {
+        if (err) {
+            console.error("Fetch pending bets error:", err.message);
+            if (callback) callback({ error: err.message });
+            return;
+        }
+
+        if (pendingBets.length === 0) {
+            console.log(`No pending bets found for ${game_name}.`);
+            if (callback) callback({ message: 'No bets to settle' });
+            return;
+        }
+
+        console.log(`Found ${pendingBets.length} bets to process for ${game_name}.`);
 
         const parts = number.split('-');
         const openPanna = parts[0] || 'XXX';
         const jodi = parts[1] || 'XX';
         const closePanna = parts[2] || 'XXX';
-        const openDigit = jodi[0] || 'X';
-        const closeDigit = jodi[1] || 'X';
-
-        const isOpenDeclared = openDigit !== 'X' && !openPanna.includes('X');
-        const isCloseDeclared = closeDigit !== 'X' && !closePanna.includes('X');
+        const isOpenDeclared = !openPanna.includes('X');
         const isJodiDeclared = !jodi.includes('X');
-
-        const getOutcome = (bet) => {
-            let outcome = 'PENDING';
-            let multiplier = 10; 
-            const betNumber = String(bet.number || '').trim();
-            
-            if (bet.game_type === 'Single Digit') {
-                multiplier = 9;
-                if (bet.session === 'OPEN' && openDigit !== 'X') outcome = (betNumber === openDigit) ? 'WON' : 'LOST';
-                else if (bet.session === 'CLOSE' && closeDigit !== 'X') outcome = (betNumber === closeDigit) ? 'WON' : 'LOST';
-            } else if (bet.game_type === 'Double Digit (Jodi)') {
-                multiplier = 95;
-                if (isJodiDeclared) outcome = (betNumber === jodi) ? 'WON' : 'LOST';
-            } else if (bet.game_type === 'Single Panna') {
-                multiplier = 156;
-                if (bet.session === 'OPEN' && !openPanna.includes('X')) outcome = (betNumber === openPanna) ? 'WON' : 'LOST';
-                else if (bet.session === 'CLOSE' && !closePanna.includes('X')) outcome = (betNumber === closePanna) ? 'WON' : 'LOST';
-            } else if (bet.game_type === 'Double Panna') {
-                multiplier = 320;
-                if (bet.session === 'OPEN' && !openPanna.includes('X')) outcome = (betNumber === openPanna) ? 'WON' : 'LOST';
-                else if (bet.session === 'CLOSE' && !closePanna.includes('X')) outcome = (betNumber === closePanna) ? 'WON' : 'LOST';
-            } else if (bet.game_type === 'Triple Panna') {
-                multiplier = 700;
-                if (bet.session === 'OPEN' && !openPanna.includes('X')) outcome = (betNumber === openPanna) ? 'WON' : 'LOST';
-                else if (bet.session === 'CLOSE' && !closePanna.includes('X')) outcome = (betNumber === closePanna) ? 'WON' : 'LOST';
-            } else if (bet.game_type === 'Half Sangam') {
                 multiplier = 1000;
                 const bParts = betNumber.split(/[x×]/);
                 if (bParts.length >= 2) {
