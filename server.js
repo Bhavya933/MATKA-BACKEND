@@ -82,6 +82,18 @@ const syncSchema = () => {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )`,
+        `CREATE TABLE IF NOT EXISTS user_bank_accounts (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            account_type ENUM('BANK', 'UPI') NOT NULL,
+            bank_name VARCHAR(100),
+            account_holder VARCHAR(155),
+            account_number VARCHAR(50),
+            ifsc_code VARCHAR(20),
+            upi_id VARCHAR(100),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )`,
         `CREATE TABLE IF NOT EXISTS notifications (
             id INT AUTO_INCREMENT PRIMARY KEY,
             title VARCHAR(255) NOT NULL,
@@ -546,6 +558,52 @@ app.get('/api/users/:id/sync', (req, res) => {
                 bets: betsRes
             });
         });
+    });
+});
+
+// Fetch Combined Transaction History (Deposits + Withdrawals)
+app.get('/api/users/:userId/transactions', (req, res) => {
+    const { userId } = req.params;
+    const query = `
+        (SELECT id, amount, status, created_at, 'DEPOSIT' as type, method FROM deposits WHERE user_id = ?)
+        UNION ALL
+        (SELECT id, amount, status, created_at, 'WITHDRAWAL' as type, method FROM withdrawals WHERE user_id = ?)
+        ORDER BY created_at DESC
+    `;
+    db.query(query, [userId, userId], (err, results) => {
+        if (err) {
+            console.error("Fetch transactions error:", err.message);
+            return res.status(500).json({ error: 'Database error: ' + err.message });
+        }
+        res.json(results);
+    });
+});
+
+// Bank Account Management API
+app.get('/api/users/:userId/accounts', (req, res) => {
+    const { userId } = req.params;
+    db.query('SELECT * FROM user_bank_accounts WHERE user_id = ? ORDER BY created_at DESC', [userId], (err, results) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(results);
+    });
+});
+
+app.post('/api/users/:userId/accounts', (req, res) => {
+    const { userId } = req.params;
+    const { account_type, bank_name, account_holder, account_number, ifsc_code, upi_id } = req.body;
+    
+    const query = 'INSERT INTO user_bank_accounts (user_id, account_type, bank_name, account_holder, account_number, ifsc_code, upi_id) VALUES (?, ?, ?, ?, ?, ?, ?)';
+    db.query(query, [userId, account_type, bank_name, account_holder, account_number, ifsc_code, upi_id], (err, result) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: 'Account saved successfully', id: result.insertId });
+    });
+});
+
+app.delete('/api/users/:userId/accounts/:accountId', (req, res) => {
+    const { userId, accountId } = req.params;
+    db.query('DELETE FROM user_bank_accounts WHERE id = ? AND user_id = ?', [accountId, userId], (err, result) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: 'Account deleted' });
     });
 });
 
