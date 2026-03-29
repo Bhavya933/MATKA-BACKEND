@@ -61,7 +61,7 @@ const syncSchema = () => {
             session ENUM('OPEN', 'CLOSE') NOT NULL,
             number VARCHAR(100) NOT NULL,
             points INT NOT NULL,
-            status ENUM('Placed', 'Won', 'Lost') DEFAULT 'Placed',
+            status ENUM('PENDING', 'WON', 'LOST') DEFAULT 'PENDING',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )`,
         `CREATE TABLE IF NOT EXISTS deposits (
@@ -142,6 +142,23 @@ const syncSchema = () => {
                         if (err) console.error("Add Column Error:", err.message);
                     });
                 }
+            });
+        }
+    });
+
+    // Fix the status ENUM for bets to be all-caps (PENDING, WON, LOST)
+    db.query("ALTER TABLE bets MODIFY COLUMN status ENUM('PENDING', 'WON', 'LOST') DEFAULT 'PENDING'", (err) => {
+        if (err) console.error("Error updating bets status enum:", err.message);
+        else {
+            // One-time data conversion for legacy statuses
+            db.query("UPDATE bets SET status = 'PENDING' WHERE status = 'Placed'", (err) => {
+                if (err) console.error("Error migrating 'Placed' to 'PENDING':", err.message);
+            });
+            db.query("UPDATE bets SET status = 'WON' WHERE status = 'Won'", (err) => {
+                if (err) console.error("Error migrating 'Won' to 'WON':", err.message);
+            });
+            db.query("UPDATE bets SET status = 'LOST' WHERE status = 'Lost'", (err) => {
+                if (err) console.error("Error migrating 'Lost' to 'LOST':", err.message);
             });
         }
     });
