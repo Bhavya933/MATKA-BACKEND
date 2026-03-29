@@ -300,12 +300,29 @@ db.getConnection((err, conn) => {
     }
     console.log('Connected to MySQL Database.');
 
-    // --- FORCE REPAIR DATABASE SCHEMA (REMOTE FIX) ---
-    console.log("🛠️ Forcing Database Schema Sync...");
-    // We run these and ignore "Duplicate Column" errors
-    conn.query("ALTER TABLE bets ADD COLUMN payoutDone TINYINT(1) DEFAULT 0", () => {});
-    conn.query("ALTER TABLE bets ADD COLUMN result_number VARCHAR(20) DEFAULT NULL", () => {
+    // --- AUTO-REPAIR DATABASE SCHEMA (REMOTE FIX) ---
+    console.log("🛠️ Checking Database Schema...");
+    conn.query("SHOW COLUMNS FROM bets LIKE 'payoutDone'", (err, results) => {
+        if (!err && results.length === 0) {
+            console.log("🏗️ Repairing 'bets' table: Adding payoutDone...");
+            conn.query("ALTER TABLE bets ADD COLUMN payoutDone TINYINT(1) DEFAULT 0");
+        }
+    });
+    conn.query("SHOW COLUMNS FROM bets LIKE 'result_number'", (err, results) => {
+        if (!err && results.length === 0) {
+            console.log("🏗️ Repairing 'bets' table: Adding result_number...");
+            conn.query("ALTER TABLE bets ADD COLUMN result_number VARCHAR(20) DEFAULT NULL");
+        }
         conn.release();
+    });
+
+    // Start Reset interval
+    setInterval(resetGamesForNewDay, 60000); 
+    repairOldBets(); 
+    
+    // ONE-TIME FORCE SETTLE FOR ANDHRA DAY (RESTORE WINNINGS)
+    setTimeout(() => {
+        console.log("🏆 FORCING payout repair for yesterday's Andhra Day...");
         settleBets("ANDHRA DAY", "100-01-010");
     }, 5000);
 });
