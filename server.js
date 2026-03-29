@@ -365,7 +365,7 @@ app.post('/api/signup', (req, res) => {
 app.post('/api/login', (req, res) => {
     const { mobile, password } = req.body;
     const query = `
-      SELECT id, mobile, mobile as name, balance, isAdmin as role, isBlocked as is_blocked 
+      SELECT id, mobile, mobile as name, balance, isAdmin, role, isBlocked as is_blocked 
       FROM users 
       WHERE mobile = ? AND password = ?
     `;
