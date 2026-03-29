@@ -101,6 +101,12 @@ const syncSchema = () => {
             audience ENUM('ALL', 'USER') DEFAULT 'ALL',
             type ENUM('INFO', 'SUCCESS', 'WARNING', 'CRITICAL') DEFAULT 'INFO',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`,
+        `CREATE TABLE IF NOT EXISTS site_settings (
+            id INT PRIMARY KEY DEFAULT 1,
+            admin_upi VARCHAR(255) DEFAULT '3103624a@bandhan',
+            support_number VARCHAR(20) DEFAULT '91XXXXXXXXXX',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         )`
     ];
 
@@ -148,9 +154,91 @@ db.getConnection((err, connection) => {
         console.log('Connected to MySQL Database.');
         syncSchema();
         seedGames();
+        seedSettings();
         connection.release();
     }
 });
+
+
+// =======================
+// BET SETTLEMENT HELPER (For Auto-Finalize)
+// =======================
+const settleBets = (game_name, number, callback) => {
+    db.query('SELECT * FROM bets WHERE game_name = ? AND status = "PENDING"', [game_name], (err, bets) => {
+        if (err) return callback ? callback({ error: err.message }) : null;
+        if (bets.length === 0) return callback ? callback({ message: 'No pending bets.' }) : null;
+
+        const parts = number.split('-');
+        const openPanna = parts[0] || 'XXX';
+        const jodi = parts[1] || 'XX';
+        const closePanna = parts[2] || 'XXX';
+        const openDigit = jodi[0] || 'X';
+        const closeDigit = jodi[1] || 'X';
+
+        const isOpenDeclared = openDigit !== 'X' && !openPanna.includes('X');
+        const isCloseDeclared = closeDigit !== 'X' && !closePanna.includes('X');
+        const isJodiDeclared = !jodi.includes('X');
+
+        const getOutcome = (bet) => {
+            let outcome = 'PENDING';
+            let multiplier = 10; 
+            
+            if (bet.game_type === 'Single Digit') {
+                multiplier = 10;
+                if (bet.session === 'OPEN' && openDigit !== 'X') outcome = (bet.digit === openDigit) ? 'WON' : 'LOST';
+                else if (bet.session === 'CLOSE' && closeDigit !== 'X') outcome = (bet.digit === closeDigit) ? 'WON' : 'LOST';
+            } else if (bet.game_type === 'Double Digit (Jodi)') {
+                multiplier = 100;
+                if (isJodiDeclared) outcome = (bet.digit === jodi) ? 'WON' : 'LOST';
+            } else if (bet.game_type === 'Single Panna') {
+                multiplier = 160;
+                if (bet.session === 'OPEN' && !openPanna.includes('X')) outcome = (bet.digit === openPanna) ? 'WON' : 'LOST';
+                else if (bet.session === 'CLOSE' && !closePanna.includes('X')) outcome = (bet.digit === closePanna) ? 'WON' : 'LOST';
+            } else if (bet.game_type === 'Double Panna') {
+                multiplier = 320;
+                if (bet.session === 'OPEN' && !openPanna.includes('X')) outcome = (bet.digit === openPanna) ? 'WON' : 'LOST';
+                else if (bet.session === 'CLOSE' && !closePanna.includes('X')) outcome = (bet.digit === closePanna) ? 'WON' : 'LOST';
+            } else if (bet.game_type === 'Triple Panna') {
+                multiplier = 700;
+                if (bet.session === 'OPEN' && !openPanna.includes('X')) outcome = (bet.digit === openPanna) ? 'WON' : 'LOST';
+                else if (bet.session === 'CLOSE' && !closePanna.includes('X')) outcome = (bet.digit === closePanna) ? 'WON' : 'LOST';
+            } else if (bet.game_type === 'Half Sangam') {
+                multiplier = 1000;
+                const bParts = bet.digit.split(/[x×]/);
+                if (bParts.length >= 2) {
+                    if (bet.session === 'OPEN' && isOpenDeclared) outcome = (bParts[0].trim() === openPanna && bParts[1].trim() === openDigit) ? 'WON' : 'LOST';
+                    else if (bet.session === 'CLOSE' && isCloseDeclared) outcome = (bParts[0].trim() === closePanna && bParts[1].trim() === closeDigit) ? 'WON' : 'LOST';
+                }
+            } else if (bet.game_type === 'Full Sangam') {
+                multiplier = 10000;
+                if (isOpenDeclared && isCloseDeclared) {
+                    const bParts = bet.digit.split(/[x×]/);
+                    if (bParts.length >= 2) outcome = (bParts[0].trim() === openPanna && bParts[1].trim() === closePanna) ? 'WON' : 'LOST';
+                }
+            }
+            return { outcome, multiplier };
+        };
+
+        let processed = 0;
+        const processNext = () => {
+            if (processed === bets.length) return callback ? callback({ message: `Settled ${bets.length} bets.` }) : null;
+            const bet = bets[processed++];
+            const { outcome, multiplier } = getOutcome(bet);
+
+            if (outcome === 'WON') {
+                const winAmount = bet.points * multiplier;
+                db.query('UPDATE users SET balance = balance + ? WHERE id = ?', [winAmount, bet.user_id], () => {
+                    db.query('UPDATE bets SET status = "WON" WHERE id = ?', [bet.id], processNext);
+                });
+            } else if (outcome === 'LOST') {
+                db.query('UPDATE bets SET status = "LOST" WHERE id = ?', [bet.id], processNext);
+            } else {
+                processNext();
+            }
+        };
+        processNext();
+    });
+};
 
 // =======================
 // AUTH ENDPOINTS
@@ -356,6 +444,36 @@ const seedGames = () => {
 };
 seedGames();
 
+const seedSettings = () => {
+    db.query('SELECT COUNT(*) AS count FROM site_settings', (err, results) => {
+        if (!err && results[0].count === 0) {
+            console.log('Seeding default site settings...');
+            db.query('INSERT INTO site_settings (id, admin_upi, support_number) VALUES (1, "3103624a@bandhan", "91XXXXXXXXXX")');
+        }
+    });
+};
+seedSettings();
+
+// Get Site Settings
+app.get('/api/settings', (req, res) => {
+    db.query('SELECT * FROM site_settings WHERE id = 1', (err, results) => {
+        if (err || results.length === 0) {
+            return res.json({ admin_upi: '3103624a@bandhan', support_number: '91XXXXXXXXXX' });
+        }
+        res.json(results[0]);
+    });
+});
+
+// Update Site Settings (Admin)
+app.put('/api/settings', (req, res) => {
+    const { admin_upi, support_number } = req.body;
+    db.query('UPDATE site_settings SET admin_upi = ?, support_number = ? WHERE id = 1', 
+    [admin_upi, support_number], (err, result) => {
+        if (err) return res.status(500).json({ error: 'Database error' });
+        res.json({ message: 'Settings updated successfully' });
+    });
+});
+
 // Get all games
 app.get('/api/games', (req, res) => {
     db.query('SELECT * FROM games ORDER BY id ASC', (err, results) => {
@@ -382,7 +500,16 @@ app.put('/api/games/:id', (req, res) => {
     db.query(query, [name, number, open_time, close_time, status, id], (err, result) => {
         if (err) return res.status(500).json({ error: 'Database error' });
         
-        res.json({ message: 'Game updated successfully' });
+        // AUTO-FINALIZE: Automatically settle bets when number is updated
+        if (number) {
+            settleBets(name, number, (settleRes) => {
+                console.log(`Auto-settled bets for ${name}:`, settleRes.message);
+                // We still return success for the game update even if settlement had no bets
+                res.json({ message: 'Game updated and bets auto-finalized successfully' });
+            });
+        } else {
+            res.json({ message: 'Game updated successfully' });
+        }
     });
 });
 
@@ -646,73 +773,14 @@ app.post('/api/bets', (req, res) => {
     });
 });
 
-// Declare Result and Payout Winners (Admin)
+// Declare Result Route (Manual Trigger)
 app.post('/api/declare-result', (req, res) => {
-    const { game_name, number } = req.body; // e.g., 'ANDHRA DAY', '100-10-100'
-
-    // 1. Update Game Outcome in games table
+    const { game_name, number } = req.body;
     db.query('UPDATE games SET number = ? WHERE name = ?', [number, game_name], (err, results) => {
         if (err) return res.status(500).json({ error: err.message });
-
-        // 2. Fetch all PENDING bets for this game
-        db.query('SELECT * FROM bets WHERE game_name = ? AND status = "PENDING"', [game_name], (err, bets) => {
-            if (err) return res.status(500).json({ error: err.message });
-
-            if (bets.length === 0) return res.json({ message: 'Result declared, no bets to settle.' });
-
-            // Helper to determine Win/Loss (Simplified logic matching App.jsx)
-            const parts = number.split('-');
-            const openPanna = parts[0];
-            const jodi = parts[1];
-            const closePanna = parts[2];
-            const openDigit = jodi[0];
-            const closeDigit = jodi[1];
-
-            let winnersCount = 0;
-
-            // Process each bet
-            const processBet = (index) => {
-                if (index === bets.length) {
-                    return res.json({ message: `Result declared! Processed ${bets.length} bets, Found ${winnersCount} winners.` });
-                }
-
-                const bet = bets[index];
-                let outcome = 'LOST';
-                let multiplier = 9;
-
-                if (bet.game_type === 'Single Digit') {
-                    if (bet.session === 'OPEN' && bet.digit === openDigit) outcome = 'WON';
-                    if (bet.session === 'CLOSE' && bet.digit === closeDigit) outcome = 'WON';
-                } else if (bet.game_type === 'Double Digit (Jodi)') {
-                    if (bet.digit === jodi) outcome = 'WON';
-                } else if (bet.game_type.includes('Panna')) {
-                    multiplier = 140;
-                    if (bet.session === 'OPEN' && bet.digit === openPanna) outcome = 'WON';
-                    if (bet.session === 'CLOSE' && bet.digit === closePanna) outcome = 'WON';
-                } else if (bet.game_type === 'Full Sangam') {
-                    multiplier = 1000;
-                    const bParts = bet.digit.split(/[x×]/);
-                    if (bParts[0].trim() === openPanna && bParts[1].trim() === closePanna) outcome = 'WON';
-                }
-
-                if (outcome === 'WON') {
-                    winnersCount++;
-                    const winAmount = bet.points * multiplier;
-                    // Update user balance + Mark bet WON
-                    db.query('UPDATE users SET balance = balance + ? WHERE id = ?', [winAmount, bet.user_id], () => {
-                        db.query('UPDATE bets SET status = "WON" WHERE id = ?', [bet.id], () => {
-                            processBet(index + 1);
-                        });
-                    });
-                } else {
-                    // Mark bet LOST
-                    db.query('UPDATE bets SET status = "LOST" WHERE id = ?', [bet.id], () => {
-                        processBet(index + 1);
-                    });
-                }
-            };
-
-            processBet(0);
+        settleBets(game_name, number, (settleRes) => {
+            if (settleRes.error) return res.status(500).json({ error: settleRes.error });
+            res.json(settleRes);
         });
     });
 });
