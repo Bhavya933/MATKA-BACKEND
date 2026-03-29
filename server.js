@@ -385,44 +385,54 @@ app.put("/api/deposits/:id/status", (req, res) => {
     return res.status(400).json({ error: "Status is required" });
   }
 
-  db.beginTransaction(err => {
+  db.getConnection((err, conn) => {
     if (err) {
-      console.error("Trans Begin Error:", err);
-      return res.status(500).json({ error: 'Transaction Begin Error: ' + err.message });
+      console.error("Get Connection Error:", err);
+      return res.status(500).json({ error: 'Database Connection Error: ' + err.message });
     }
 
-    // 1. Get deposit info before anything
-    db.query('SELECT user_id, amount, status FROM deposits WHERE id = ?', [id], (err, results) => {
-      if (err) return db.rollback(() => res.status(500).json({ error: 'Fetch Deposit Error: ' + err.message }));
-      if (results.length === 0) return db.rollback(() => res.status(404).json({ error: 'Deposit not found' }));
+    conn.beginTransaction(err => {
+      if (err) {
+        conn.release();
+        console.error("Trans Begin Error:", err);
+        return res.status(500).json({ error: 'Transaction Begin Error: ' + err.message });
+      }
 
-      const deposit = results[0];
-      if (deposit.status !== 'PENDING') return db.rollback(() => res.status(400).json({ error: 'Deposit is ' + deposit.status + ', cannot change.' }));
+      // 1. Get deposit info before anything
+      conn.query('SELECT user_id, amount, status FROM deposits WHERE id = ?', [id], (err, results) => {
+        if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Fetch Deposit Error: ' + err.message }); });
+        if (results.length === 0) return conn.rollback(() => { conn.release(); res.status(404).json({ error: 'Deposit not found' }); });
 
-      // 2. Update status
-      const updateStatusSql = "UPDATE deposits SET status = ? WHERE id = ?";
-      db.query(updateStatusSql, [status, id], (err, updateRes) => {
-        if (err) return db.rollback(() => res.status(500).json({ error: 'Status Update Error: ' + err.message }));
+        const deposit = results[0];
+        if (deposit.status !== 'PENDING') return conn.rollback(() => { conn.release(); res.status(400).json({ error: 'Deposit is ' + deposit.status + ', cannot change.' }); });
 
-        // 3. If APPROVED, Add Balance to User
-        if (status === 'APPROVED') {
-          const amount = parseFloat(deposit.amount);
-          db.query('UPDATE users SET balance = balance + ? WHERE id = ?', [amount, deposit.user_id], (err, userRes) => {
-            if (err) return db.rollback(() => res.status(500).json({ error: 'Balance Update Error: ' + err.message }));
-            
-            db.commit(err => {
-              if (err) return db.rollback(() => res.status(500).json({ error: 'Commit Error: ' + err.message }));
-              console.log(`Successfully approved deposit ${id} for user ${deposit.user_id}. Amount added: ${amount}`);
-              res.json({ message: "Status updated and balance added successfully ✅" });
+        // 2. Update status
+        const updateStatusSql = "UPDATE deposits SET status = ? WHERE id = ?";
+        conn.query(updateStatusSql, [status, id], (err, updateRes) => {
+          if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Status Update Error: ' + err.message }); });
+
+          // 3. If APPROVED, Add Balance to User
+          if (status === 'APPROVED') {
+            const amount = parseFloat(deposit.amount);
+            conn.query('UPDATE users SET balance = balance + ? WHERE id = ?', [amount, deposit.user_id], (err, userRes) => {
+              if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Balance Update Error: ' + err.message }); });
+              
+              conn.commit(err => {
+                if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Commit Error: ' + err.message }); });
+                conn.release();
+                console.log(`Successfully approved deposit ${id} for user ${deposit.user_id}. Amount added: ${amount}`);
+                res.json({ message: "Status updated and balance added successfully ✅" });
+              });
             });
-          });
-        } else {
-          db.commit(err => {
-            if (err) return db.rollback(() => res.status(500).json({ error: 'Commit Error: ' + err.message }));
-            console.log(`Successfully rejected deposit ${id}`);
-            res.json({ message: "Deposit rejected successfully ✅" });
-          });
-        }
+          } else {
+            conn.commit(err => {
+              if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Commit Error: ' + err.message }); });
+              conn.release();
+              console.log(`Successfully rejected deposit ${id}`);
+              res.json({ message: "Deposit rejected successfully ✅" });
+            });
+          }
+        });
       });
     });
   });
@@ -461,29 +471,34 @@ app.get('/api/users/:id/sync', (req, res) => {
 app.post('/api/bets', (req, res) => {
     const { user_id, game_name, game_type, session, digit, points } = req.body;
 
-    db.beginTransaction(err => {
-        if (err) return res.status(500).json({ error: 'Trans Begin Error: ' + err.message });
+    db.getConnection((err, conn) => {
+        if (err) return res.status(500).json({ error: 'Database Connection Error: ' + err.message });
 
-        // 1. Check Balance
-        db.query('SELECT balance FROM users WHERE id = ?', [user_id], (err, results) => {
-            if (err) return db.rollback(() => res.status(500).json({ error: 'Check Bal Error: ' + err.message }));
-            if (results.length === 0) return db.rollback(() => res.status(404).json({ error: 'User not found' }));
+        conn.beginTransaction(err => {
+            if (err) { conn.release(); return res.status(500).json({ error: 'Trans Begin Error: ' + err.message }); }
 
-            const balance = results[0].balance;
-            if (balance < points) return db.rollback(() => res.status(400).json({ error: 'Insufficient Balance' }));
+            // 1. Check Balance
+            conn.query('SELECT balance FROM users WHERE id = ?', [user_id], (err, results) => {
+                if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Check Bal Error: ' + err.message }); });
+                if (results.length === 0) return conn.rollback(() => { conn.release(); res.status(404).json({ error: 'User not found' }); });
 
-            // 2. Subtract Balance
-            db.query('UPDATE users SET balance = balance - ? WHERE id = ?', [points, user_id], (err, results) => {
-                if (err) return db.rollback(() => res.status(500).json({ error: 'Update Bal Error: ' + err.message }));
+                const balance = results[0].balance;
+                if (balance < points) return conn.rollback(() => { conn.release(); res.status(400).json({ error: 'Insufficient Balance' }); });
 
-                // 3. Insert Bet
-                const betSql = 'INSERT INTO bets (user_id, game_name, game_type, session, digit, points, status) VALUES (?, ?, ?, ?, ?, ?, "PENDING")';
-                db.query(betSql, [user_id, game_name, game_type, session, digit, points], (err, results) => {
-                    if (err) return db.rollback(() => res.status(500).json({ error: 'Insert Bet Error: ' + err.message }));
+                // 2. Subtract Balance
+                conn.query('UPDATE users SET balance = balance - ? WHERE id = ?', [points, user_id], (err, results) => {
+                    if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Update Bal Error: ' + err.message }); });
 
-                    db.commit(err => {
-                        if (err) return db.rollback(() => res.status(500).json({ error: 'Commit Error: ' + err.message }));
-                        res.json({ message: 'Bet placed successfully', balance: balance - points });
+                    // 3. Insert Bet
+                    const betSql = 'INSERT INTO bets (user_id, game_name, game_type, session, digit, points, status) VALUES (?, ?, ?, ?, ?, ?, "PENDING")';
+                    conn.query(betSql, [user_id, game_name, game_type, session, digit, points], (err, results) => {
+                        if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Insert Bet Error: ' + err.message }); });
+
+                        conn.commit(err => {
+                            if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Commit Error: ' + err.message }); });
+                            conn.release();
+                            res.json({ message: 'Bet placed successfully', balance: balance - points });
+                        });
                     });
                 });
             });
