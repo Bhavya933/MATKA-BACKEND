@@ -196,20 +196,91 @@ app.get('/api/withdrawals', (req, res) => {
 // Update withdrawal status
 app.post('/api/withdrawals/status', (req, res) => {
     const { id, status } = req.body;
-    const query = 'UPDATE withdrawals SET status = ? WHERE id = ?';
-    db.query(query, [status, id], (err, result) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
-        res.json({ message: 'Status updated successfully' });
+
+    db.getConnection((err, conn) => {
+        if (err) return res.status(500).json({ error: 'Database Connection Error: ' + err.message });
+
+        conn.beginTransaction(err => {
+            if (err) { conn.release(); return res.status(500).json({ error: 'Trans Begin Error: ' + err.message }); }
+
+            // 1. Get original withdrawal info
+            conn.query('SELECT user_id, amount, status FROM withdrawals WHERE id = ?', [id], (err, results) => {
+                if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: err.message }); });
+                if (results.length === 0) return conn.rollback(() => { conn.release(); res.status(404).json({ error: 'Withdrawal not found' }); });
+
+                const withdrawal = results[0];
+                if (withdrawal.status !== 'PENDING') return conn.rollback(() => { conn.release(); res.status(400).json({ error: 'Request is already ' + withdrawal.status }); });
+
+                // 2. Update status
+                conn.query('UPDATE withdrawals SET status = ? WHERE id = ?', [status, id], (err, result) => {
+                    if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: err.message }); });
+
+                    // 3. If REJECTED, Refund Balance to User
+                    if (status === 'REJECTED') {
+                        const amount = parseFloat(withdrawal.amount);
+                        conn.query('UPDATE users SET balance = balance + ? WHERE id = ?', [amount, withdrawal.user_id], (err, userRes) => {
+                            if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Refund Error: ' + err.message }); });
+                            
+                            conn.commit(err => {
+                                if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Commit Error: ' + err.message }); });
+                                conn.release();
+                                console.log(`Successfully REJECTED withdrawal ${id} and REFUNDED ${amount} to user ${withdrawal.user_id}`);
+                                res.json({ message: 'Withdrawal REJECTED and amount REFUNDED to user wallet ✅' });
+                            });
+                        });
+                    } else {
+                        // APPROVED case: Money already deducted on request
+                        conn.commit(err => {
+                            if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Commit Error: ' + err.message }); });
+                            conn.release();
+                            console.log(`Successfully APPROVED withdrawal ${id}`);
+                            res.json({ message: 'Withdrawal APPROVED successfully ✅' });
+                        });
+                    }
+                });
+            });
+        });
     });
 });
 
 // Request new withdrawal
 app.post('/api/withdrawals', (req, res) => {
-    const { id, user_id, amount, method, upi_id, account_number, ifsc } = req.body;
-    const query = 'INSERT INTO withdrawals (id, user_id, amount, method, upi_id, account_number, ifsc, status) VALUES (?, ?, ?, ?, ?, ?, ?, "PENDING")';
-    db.query(query, [id, user_id, amount, method, upi_id, account_number, ifsc], (err, result) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
-        res.json({ message: 'Withdrawal requested successfully' });
+    const { user_id, amount, method, upi_id, account_number, ifsc } = req.body;
+    const withdrawAmount = parseFloat(amount || 0);
+
+    db.getConnection((err, conn) => {
+        if (err) return res.status(500).json({ error: 'Database Connection Error: ' + err.message });
+
+        conn.beginTransaction(err => {
+            if (err) { conn.release(); return res.status(500).json({ error: 'Trans Begin Error: ' + err.message }); }
+
+            // 1. Check if user has enough balance
+            conn.query('SELECT balance FROM users WHERE id = ?', [user_id], (err, results) => {
+                if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: err.message }); });
+                if (results.length === 0) return conn.rollback(() => { conn.release(); res.status(404).json({ error: 'User not found' }); });
+
+                const balance = parseFloat(results[0].balance);
+                if (balance < withdrawAmount) return conn.rollback(() => { conn.release(); res.status(400).json({ error: 'Insufficient wallet balance' }); });
+
+                // 2. Deduct balance from users table immediately
+                conn.query('UPDATE users SET balance = balance - ? WHERE id = ?', [withdrawAmount, user_id], (err, userRes) => {
+                    if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Balance deduction failed: ' + err.message }); });
+
+                    // 3. Insert withdrawal request
+                    const insertSql = 'INSERT INTO withdrawals (user_id, amount, method, upi_id, account_number, ifsc, status) VALUES (?, ?, ?, ?, ?, ?, "PENDING")';
+                    conn.query(insertSql, [user_id, withdrawAmount, method, upi_id, account_number, ifsc], (err, result) => {
+                        if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Insert Withdrawal Error: ' + err.message }); });
+
+                        conn.commit(err => {
+                            if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Commit Error: ' + err.message }); });
+                            conn.release();
+                            console.log(`User ${user_id} requested withdrawal. ${withdrawAmount} deducted from wallet.`);
+                            res.json({ message: 'Withdrawal requested successfully. Amount deducted from wallet.', new_balance: balance - withdrawAmount });
+                        });
+                    });
+                });
+            });
+        });
     });
 });
 
