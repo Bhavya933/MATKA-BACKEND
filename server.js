@@ -184,6 +184,7 @@ const syncSchema = () => {
     // --- REPAIR OLD HISTORY AUTOMATICALLY ---
     const repairOldBets = () => {
         console.log("🛠️ Starting History Repair (Final Payout)...");
+        // Only select those that are NOT already Won/Lost
         db.query("SELECT TRIM(name) as name, number FROM games WHERE number != 'XXX-XX-XXX'", (err, games) => {
             if (!err && games.length > 0) {
                 games.forEach(g => {
@@ -292,16 +293,38 @@ const syncSchema = () => {
     });
 };
 
-db.getConnection((err, connection) => {
+db.getConnection((err, conn) => {
     if (err) {
-        console.error('Database connection failed:', err);
-    } else {
-        console.log('Connected to MySQL Database.');
-        syncSchema();
-        seedGames();
-        seedSettings();
-        connection.release();
+        console.error('MySQL Connection Error:', err.message);
+        return;
     }
+    console.log('Connected to MySQL Database.');
+
+    // --- AUTO-REPAIR DATABASE SCHEMA (REMOTE FIX) ---
+    console.log("🛠️ Checking Database Schema...");
+    conn.query("SHOW COLUMNS FROM bets LIKE 'payoutDone'", (err, results) => {
+        if (!err && results.length === 0) {
+            console.log("🏗️ Repairing 'bets' table: Adding payoutDone...");
+            conn.query("ALTER TABLE bets ADD COLUMN payoutDone TINYINT(1) DEFAULT 0");
+        }
+    });
+    conn.query("SHOW COLUMNS FROM bets LIKE 'result_number'", (err, results) => {
+        if (!err && results.length === 0) {
+            console.log("🏗️ Repairing 'bets' table: Adding result_number...");
+            conn.query("ALTER TABLE bets ADD COLUMN result_number VARCHAR(20) DEFAULT NULL");
+        }
+        conn.release();
+    });
+
+    // Start Reset interval
+    setInterval(resetGamesForNewDay, 60000); 
+    repairOldBets(); 
+    
+    // ONE-TIME FORCE SETTLE FOR ANDHRA DAY (RESTORE WINNINGS)
+    setTimeout(() => {
+        console.log("🏆 FORCING payout repair for yesterday's Andhra Day...");
+        settleBets("ANDHRA DAY", "100-01-010");
+    }, 5000);
 });
 
 
@@ -314,8 +337,8 @@ const settleBets = (game_name, inputNumber, callback) => {
     const number = (inputNumber || 'XXX-XX-XXX').toUpperCase();
     console.log(`🎯 Settling bets for ${game_name} with result ${number}`);
 
-    // MUST match Database values: 'Placed' or 'PENDING'
-    const query = 'SELECT * FROM bets WHERE TRIM(game_name) = ? AND (status = "Placed" OR status = "PENDING" OR status = "pending")';
+    // Robust Catch-all query for PENDING or Placed
+    const query = 'SELECT * FROM bets WHERE TRIM(game_name) = ? AND (status = "Placed" OR UPPER(status) = "PENDING") AND payoutDone = 0';
     db.query(query, [game_name.trim()], (err, pendingBets) => {
         if (err) {
             console.error("Fetch pending bets error:", err.message);
@@ -399,13 +422,26 @@ const settleBets = (game_name, inputNumber, callback) => {
                 const winAmount = bet.points * multiplier;
                 db.query('UPDATE users SET balance = balance + ? WHERE mobile = ?', [winAmount, bet.user_mobile], (err) => {
                     if (err) console.error("Balance update failed:", err.message);
+                    // 3. Final Step: Mark as Won in DB
+                    // Note: Using 'Won' case to match strict ENUMs
                     db.query('UPDATE bets SET status = "Won", result_number = ?, payoutDone = 1 WHERE id = ?', [number, bet.id], (err) => {
-                        processNext();
+                        if (err) {
+                            console.error(`❌ STATUS UPDATE FAILED for Bet ${bet.id}:`, err.message);
+                            // Fallback: try lowercase 'won' if strict enum is failing
+                            db.query('UPDATE bets SET status = "won", result_number = ?, payoutDone = 1 WHERE id = ?', [number, bet.id], () => processNext());
+                        } else {
+                            console.log(`✅ Bet ${bet.id} fully settled as Won.`);
+                            processNext();
+                        }
                     });
                 });
             } else if (outcome === 'Lost') {
                 db.query('UPDATE bets SET status = "Lost", result_number = ? WHERE id = ?', [number, bet.id], (err) => {
-                    processNext();
+                    if (err) {
+                        db.query('UPDATE bets SET status = "lost", result_number = ? WHERE id = ?', [number, bet.id], () => processNext());
+                    } else {
+                        processNext();
+                    }
                 });
             } else {
                 processNext();
