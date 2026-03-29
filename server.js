@@ -332,13 +332,16 @@ app.get('/api/users/:id/status', (req, res) => {
 // Fetch all deposits (Admin)
 app.get('/api/deposits', (req, res) => {
     const sql = `
-        SELECT d.*, u.username as name 
+        SELECT d.*, IFNULL(u.username, 'Unknown User') as name 
         FROM deposits d 
-        JOIN users u ON d.user_id = u.id 
+        LEFT JOIN users u ON d.user_id = u.id 
         ORDER BY d.created_at DESC
     `;
     db.query(sql, (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
+        if (err) {
+            console.error("Fetch deposits error:", err.message);
+            return res.status(500).json({ error: 'Fetch Deposits Error: ' + err.message });
+        }
         res.json(results);
     });
 });
