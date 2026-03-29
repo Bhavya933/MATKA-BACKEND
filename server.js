@@ -352,16 +352,27 @@ const settleBets = (game_name, inputNumber, callback) => {
             return;
         }
 
-        const parts = number.split('-');
-        const openPanna = parts[0] || 'XXX';
-        const jodi = parts[1] || 'XX';
-        const closePanna = parts[2] || 'XXX';
+        const parts = (number || '').split('-');
+        let openPanna = 'XXX', jodi = 'XX', closePanna = 'XXX';
+
+        if (parts.length === 3) {
+            openPanna = parts[0];
+            jodi = parts[1];
+            closePanna = parts[2];
+        } else if (parts.length === 1 && number.length === 1 && /[0-9]/.test(number)) {
+            jodi = number + 'X';
+        } else if (parts.length === 1 && number.length === 2 && /[0-9]/.test(number)) {
+            jodi = number;
+        }
+
         const openDigit = jodi[0] || 'X';
         const closeDigit = jodi[1] || 'X';
 
-        const isOpenDeclared = !openPanna.includes('X');
-        const isJodiDeclared = !jodi.includes('X');
-        const isCloseDeclared = !closePanna.includes('X');
+        const isOpenDigitDeclared = /[0-9]/.test(openDigit);
+        const isCloseDigitDeclared = /[0-9]/.test(closeDigit);
+        const isOpenPannaDeclared = openPanna.length === 3 && !openPanna.includes('X');
+        const isClosePannaDeclared = closePanna.length === 3 && !closePanna.includes('X');
+        const isJodiDeclared = jodi.length === 2 && !jodi.includes('X');
 
         let processed = 0;
         const processNext = () => {
@@ -379,37 +390,37 @@ const settleBets = (game_name, inputNumber, callback) => {
             try {
                 if (bet.game_type === 'Single Digit') {
                     multiplier = 9.5;
-                    if (bet.session === 'OPEN' && isOpenDeclared) outcome = (betNumber === openDigit) ? 'Won' : 'Lost';
-                    else if (bet.session === 'CLOSE' && isCloseDeclared) outcome = (betNumber === closeDigit) ? 'Won' : 'Lost';
+                    if (bet.session === 'OPEN' && isOpenDigitDeclared) outcome = (betNumber === openDigit) ? 'Won' : 'Lost';
+                    else if (bet.session === 'CLOSE' && isCloseDigitDeclared) outcome = (betNumber === closeDigit) ? 'Won' : 'Lost';
                 } else if (bet.game_type === 'Double Digit (Jodi)') {
                     multiplier = 95;
                     if (isJodiDeclared) outcome = (betNumber === jodi) ? 'Won' : 'Lost';
                 } else if (bet.game_type === 'Single Panna') {
                     multiplier = 156;
-                    if (bet.session === 'OPEN' && isOpenDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
-                    else if (bet.session === 'CLOSE' && isCloseDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
+                    if (bet.session === 'OPEN' && isOpenPannaDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
+                    else if (bet.session === 'CLOSE' && isClosePannaDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
                 } else if (bet.game_type === 'Double Panna') {
                     multiplier = 320;
-                    if (bet.session === 'OPEN' && isOpenDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
-                    else if (bet.session === 'CLOSE' && isCloseDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
+                    if (bet.session === 'OPEN' && isOpenPannaDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
+                    else if (bet.session === 'CLOSE' && isClosePannaDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
                 } else if (bet.game_type === 'Triple Panna') {
                     multiplier = 800;
-                    if (bet.session === 'OPEN' && isOpenDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
-                    else if (bet.session === 'CLOSE' && isCloseDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
+                    if (bet.session === 'OPEN' && isOpenPannaDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
+                    else if (bet.session === 'CLOSE' && isClosePannaDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
                 } else if (bet.game_type === 'Half Sangam') {
                     multiplier = 1000;
                     const bParts = betNumber.split(/[x×]/);
                     if (bParts.length >= 2) {
-                        if (bet.session === 'OPEN' && isOpenDeclared && isCloseDeclared) {
+                        if (bet.session === 'OPEN' && isOpenPannaDeclared && isCloseDigitDeclared) {
                            outcome = (bParts[0].trim() === openPanna && bParts[1].trim() === closeDigit) ? 'Won' : 'Lost';
-                        } else if (bet.session === 'CLOSE' && isOpenDeclared && isCloseDeclared) {
+                        } else if (bet.session === 'CLOSE' && isClosePannaDeclared && isOpenDigitDeclared) {
                            outcome = (bParts[0].trim() === closePanna && bParts[1].trim() === openDigit) ? 'Won' : 'Lost';
                         }
                     }
                 } else if (bet.game_type === 'Full Sangam') {
                     multiplier = 10000;
                     const bParts = betNumber.split(/[x×]/);
-                    if (bParts.length >= 2 && isOpenDeclared && isCloseDeclared) {
+                    if (bParts.length >= 2 && isOpenPannaDeclared && isClosePannaDeclared) {
                         outcome = (bParts[0].trim() === openPanna && bParts[1].trim() === closePanna) ? 'Won' : 'Lost';
                     }
                 }
