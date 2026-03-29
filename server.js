@@ -837,8 +837,8 @@ app.put("/api/deposits/:id/status", (req, res) => {
 // Fetch User Data (Balance + Bets + Block Status) - For AUTO SYNC
 app.get('/api/users/:mobile/sync', (req, res) => {
     const { mobile } = req.params;
-    const userSql = 'SELECT balance, isAdmin, isBlocked FROM users WHERE mobile = ?';
-    const betsSql = 'SELECT * FROM bets WHERE user_mobile = ? ORDER BY created_at DESC LIMIT 50';
+    const userSql = 'SELECT id, mobile, balance, isAdmin, isBlocked FROM users WHERE mobile = ?';
+    const betsSql = 'SELECT id, game_name, game_type, number, points, session, status, payoutDone, result_number, created_at FROM bets WHERE user_mobile = ? ORDER BY created_at DESC LIMIT 50';
 
     db.query(userSql, [mobile], (err, userRes) => {
         if (err) {
