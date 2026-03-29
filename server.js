@@ -848,10 +848,11 @@ app.post('/api/bets', (req, res) => {
             if (err) { conn.release(); return res.status(500).json({ error: 'Trans Begin Error: ' + err.message }); }
 
             // 1. Check Balance
-            conn.query('SELECT balance FROM users WHERE mobile = ?', [user_mobile], (err, results) => {
+            conn.query('SELECT id, balance FROM users WHERE mobile = ?', [user_mobile], (err, results) => {
                 if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Check Bal Error: ' + err.message }); });
                 if (results.length === 0) return conn.rollback(() => { conn.release(); res.status(404).json({ error: 'User not found' }); });
 
+                const userId = results[0].id;
                 const balance = results[0].balance;
                 if (balance < points) return conn.rollback(() => { conn.release(); res.status(400).json({ error: 'Insufficient Balance' }); });
 
@@ -860,8 +861,8 @@ app.post('/api/bets', (req, res) => {
                     if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Update Bal Error: ' + err.message }); });
 
                     // 3. Insert Bet
-                    const betSql = 'INSERT INTO bets (user_mobile, game_name, game_type, session, number, points, status) VALUES (?, ?, ?, ?, ?, ?, "Placed")';
-                    conn.query(betSql, [user_mobile, game_name, game_type, session, number, points], (err, results) => {
+                    const betSql = 'INSERT INTO bets (user_id, user_mobile, game_name, game_type, session, number, points, status) VALUES (?, ?, ?, ?, ?, ?, ?, "Placed")';
+                    conn.query(betSql, [userId, user_mobile, game_name, game_type, session, number, points], (err, results) => {
                         if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Insert Bet Error: ' + err.message }); });
 
                         conn.commit(err => {
