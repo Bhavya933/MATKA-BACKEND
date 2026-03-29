@@ -183,7 +183,7 @@ const syncSchema = () => {
 
     // --- REPAIR OLD HISTORY AUTOMATICALLY ---
     const repairOldBets = () => {
-        console.log("🛠️ Starting History Repair (Space-Proof)...");
+        console.log("🛠️ Starting History Repair (Final Payout)...");
         db.query("SELECT TRIM(name) as name, number FROM games WHERE number != 'XXX-XX-XXX'", (err, games) => {
             if (!err && games.length > 0) {
                 games.forEach(g => {
@@ -314,7 +314,8 @@ const settleBets = (game_name, inputNumber, callback) => {
     const number = (inputNumber || 'XXX-XX-XXX').toUpperCase();
     console.log(`🎯 Settling bets for ${game_name} with result ${number}`);
 
-    const query = 'SELECT * FROM bets WHERE TRIM(game_name) = ? AND (status = "PENDING" OR status = "Placed" OR status = "pending")';
+    // MUST match Database ENUM: 'Placed'
+    const query = 'SELECT * FROM bets WHERE TRIM(game_name) = ? AND status = "Placed"';
     db.query(query, [game_name.trim()], (err, pendingBets) => {
         if (err) {
             console.error("Fetch pending bets error:", err.message);
