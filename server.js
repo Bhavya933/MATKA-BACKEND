@@ -49,10 +49,21 @@ app.post('/api/signup', (req, res) => {
 // Login
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
-    const query = 'SELECT id, username, role, balance, is_blocked FROM users WHERE username = ? AND password = ?';
+    const query = `
+      SELECT id, username, role, balance, is_blocked 
+      FROM users 
+      WHERE username = ? AND password = ?
+    `;
+    
     db.query(query, [username, password], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
-        if (results.length === 0) return res.status(401).json({ error: 'Invalid username or password' });
+        if (err) {
+            console.error('SERVER LOGIN ERROR:', err);
+            return res.status(500).json({ error: 'Database error: ' + err.message });
+        }
+        
+        if (results.length === 0) {
+            return res.status(401).json({ error: 'Invalid username or password' });
+        }
         
         const user = results[0];
         if (user.is_blocked) {
