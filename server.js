@@ -360,38 +360,47 @@ app.post('/api/deposits', (req, res) => {
 });
 
 // Update deposit status (Approve/Reject)
+app.post('/api/deposits/:id/approve', (req, res) => {
+    // Legacy support redirect if needed, but the PUT is the primary one below.
+});
+
 app.put('/api/deposits/:id/status', (req, res) => {
     const { id } = req.params;
     const { status } = req.body; // 'APPROVED' or 'REJECTED'
 
+    console.log(`Processing deposit ${id} status update to ${status}...`);
+
     db.beginTransaction(err => {
-        if (err) return res.status(500).json({ error: err.message });
+        if (err) return res.status(500).json({ error: 'Trans Begin Error: ' + err.message });
 
         // 1. Get deposit info
         db.query('SELECT user_id, amount, status FROM deposits WHERE id = ?', [id], (err, results) => {
-            if (err) return db.rollback(() => res.status(500).json({ error: err.message }));
+            if (err) return db.rollback(() => res.status(500).json({ error: 'Fetch Deposit Error: ' + err.message }));
             if (results.length === 0) return db.rollback(() => res.status(404).json({ error: 'Deposit not found' }));
 
             const deposit = results[0];
-            if (deposit.status !== 'PENDING') return db.rollback(() => res.status(400).json({ error: 'Deposit already processed' }));
+            if (deposit.status !== 'PENDING') return db.rollback(() => res.status(400).json({ error: 'Deposit is ' + deposit.status + ', cannot change.' }));
 
             // 2. Update status
-            db.query('UPDATE deposits SET status = ? WHERE id = ?', [status, id], (err, results) => {
-                if (err) return db.rollback(() => res.status(500).json({ error: err.message }));
+            db.query('UPDATE deposits SET status = ? WHERE id = ?', [status, id], (err, updateRes) => {
+                if (err) return db.rollback(() => res.status(500).json({ error: 'Status Update Error: ' + err.message }));
 
                 // 3. If APPROVED, Add Balance to User
                 if (status === 'APPROVED') {
-                    db.query('UPDATE users SET balance = balance + ? WHERE id = ?', [deposit.amount, deposit.user_id], (err, results) => {
-                        if (err) return db.rollback(() => res.status(500).json({ error: err.message }));
+                    const amount = parseFloat(deposit.amount);
+                    db.query('UPDATE users SET balance = balance + ? WHERE id = ?', [amount, deposit.user_id], (err, userRes) => {
+                        if (err) return db.rollback(() => res.status(500).json({ error: 'Balance Update Error: ' + err.message }));
                         
                         db.commit(err => {
-                            if (err) return db.rollback(() => res.status(500).json({ error: err.message }));
+                            if (err) return db.rollback(() => res.status(500).json({ error: 'Commit Error: ' + err.message }));
+                            console.log(`Successfully approved deposit ${id} for user ${deposit.user_id}`);
                             res.json({ message: 'Deposit approved and balance updated' });
                         });
                     });
                 } else {
                     db.commit(err => {
-                        if (err) return db.rollback(() => res.status(500).json({ error: err.message }));
+                        if (err) return db.rollback(() => res.status(500).json({ error: 'Commit Error: ' + err.message }));
+                        console.log(`Successfully rejected deposit ${id}`);
                         res.json({ message: 'Deposit rejected' });
                     });
                 }
