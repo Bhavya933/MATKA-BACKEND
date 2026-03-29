@@ -163,10 +163,17 @@ db.getConnection((err, connection) => {
 // =======================
 // BET SETTLEMENT HELPER (For Auto-Finalize)
 // =======================
-const settleBets = (game_name, number, callback) => {
+const settleBets = (game_name, inputNumber, callback) => {
+    const number = (inputNumber || 'XXX-XX-XXX').toUpperCase();
+    
+    // Safety Check: Do not settle if the result is still just placeholders
+    if (number === 'XXX-XX-XXX' || !/[0-9]/.test(number)) {
+        return callback ? callback({ message: 'Result not yet declared. Skipping settlement.' }) : null;
+    }
+
     db.query('SELECT * FROM bets WHERE game_name = ? AND status = "PENDING"', [game_name], (err, bets) => {
         if (err) return callback ? callback({ error: err.message }) : null;
-        if (bets.length === 0) return callback ? callback({ message: 'No pending bets.' }) : null;
+        if (bets.length === 0) return callback ? callback({ message: 'No pending bets for this game.' }) : null;
 
         const parts = number.split('-');
         const openPanna = parts[0] || 'XXX';
