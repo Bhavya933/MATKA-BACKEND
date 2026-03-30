@@ -56,8 +56,10 @@ const syncSchema = () => {
         `CREATE TABLE IF NOT EXISTS users (
             id INT AUTO_INCREMENT PRIMARY KEY,
             mobile VARCHAR(15) UNIQUE NOT NULL,
+            name VARCHAR(100),
             password VARCHAR(255) NOT NULL,
             isAdmin TINYINT(1) DEFAULT 0,
+            role ENUM('USER', 'ADMIN') DEFAULT 'USER',
             balance DECIMAL(15, 2) DEFAULT 0.00,
             isBlocked TINYINT(1) DEFAULT 0,
             is_blocked TINYINT(1) DEFAULT 0,
@@ -82,6 +84,7 @@ const syncSchema = () => {
             number VARCHAR(100) NOT NULL,
             points INT NOT NULL,
             status ENUM('PENDING', 'WON', 'LOST') DEFAULT 'PENDING',
+            payoutDone TINYINT(1) DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )`,
         `CREATE TABLE IF NOT EXISTS deposits (
@@ -137,22 +140,32 @@ const syncSchema = () => {
     });
 
     // Handle column migrations for users (username -> mobile, isAdmin)
+    // Add 'name' column if missing
+    db.query("SHOW COLUMNS FROM users LIKE 'name'", (err, rows) => {
+        if (!err && rows.length === 0) {
+            db.query("ALTER TABLE users ADD COLUMN name VARCHAR(100)", (err) => {
+                if (!err) db.query("UPDATE users SET name = mobile WHERE name IS NULL OR name = ''");
+            });
+        }
+    });
+
     db.query("SHOW COLUMNS FROM users LIKE 'mobile'", (err, rows) => {
         if (!err && rows.length === 0) {
-            // Check if username exists to rename it, else just add mobile
             db.query("SHOW COLUMNS FROM users LIKE 'username'", (err, uRows) => {
                 if (!err && uRows.length > 0) {
                     console.log("Renaming username to mobile...");
-                    db.query("ALTER TABLE users CHANGE username mobile VARCHAR(15) UNIQUE NOT NULL", (err) => {
-                        if (err) console.error("Rename Error:", err.message);
-                    });
+                    db.query("ALTER TABLE users CHANGE username mobile VARCHAR(15) UNIQUE NOT NULL");
                 } else {
-                    console.log("Adding mobile column to users...");
-                    db.query("ALTER TABLE users ADD COLUMN mobile VARCHAR(15) UNIQUE NOT NULL", (err) => {
-                        if (err) console.error("Add Column Error:", err.message);
-                    });
+                    db.query("ALTER TABLE users ADD COLUMN mobile VARCHAR(15) UNIQUE NOT NULL");
                 }
             });
+        }
+    });
+
+    // Handle 'role' column
+    db.query("SHOW COLUMNS FROM users LIKE 'role'", (err, rows) => {
+        if (!err && rows.length === 0) {
+            db.query("ALTER TABLE users ADD COLUMN role ENUM('USER', 'ADMIN') DEFAULT 'USER'");
         }
     });
 
@@ -390,7 +403,7 @@ app.post('/api/signup', (req, res) => {
 app.post('/api/login', (req, res) => {
     const { mobile, password } = req.body;
     const query = `
-      SELECT id, mobile, mobile as name, balance, isAdmin, role, isBlocked, is_blocked 
+      SELECT id, mobile, name, balance, isAdmin, role, isBlocked, is_blocked 
       FROM users 
       WHERE mobile = ? AND password = ?
     `;
@@ -411,7 +424,7 @@ app.post('/api/login', (req, res) => {
             return res.status(403).json({ error: 'Account Blocked! Please contact admin.' });
         }
         
-        // Return a clean user object with a fallback name
+        // Return a clean user object with a fallback name if column is null
         const cleanUser = { ...user, name: user.name || user.mobile };
         res.json({ message: 'Login successful', user: cleanUser });
     });
@@ -595,16 +608,24 @@ seedSettings();
 // Get all user details (Sync Heartbeat)
 app.get('/api/users/:identifier/sync', (req, res) => {
     const { identifier } = req.params;
-    const query = 'SELECT id, balance, isBlocked, is_blocked, role FROM users WHERE mobile = ? OR id = ?';
+    const query = 'SELECT id, mobile, name, balance, isBlocked, is_blocked, role FROM users WHERE mobile = ? OR id = ?';
     db.query(query, [identifier, identifier], (err, results) => {
         if (err || results.length === 0) {
             return res.status(404).json({ error: 'User not found' });
         }
         const user = results[0];
-        res.json({
-            balance: user.balance,
-            is_blocked: (user.isBlocked === 1 || user.is_blocked === 1),
-            role: user.role
+        
+        // Also fetch user's bets for the history section
+        const betQuery = 'SELECT * FROM bets WHERE user_mobile = ? OR user_id = ? ORDER BY created_at DESC LIMIT 50';
+        db.query(betQuery, [user.mobile, user.id], (err, bets) => {
+            res.json({
+                name: user.name || user.mobile,
+                mobile: user.mobile,
+                balance: user.balance,
+                is_blocked: (user.isBlocked === 1 || user.is_blocked === 1),
+                role: user.role,
+                bets: bets || []
+            });
         });
     });
 });
@@ -953,3 +974,4 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
+
