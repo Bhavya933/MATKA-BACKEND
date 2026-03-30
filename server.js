@@ -137,6 +137,17 @@ const syncSchema = () => {
         });
     });
 
+    // --- PRIORITY MIGRATIONS ---
+    db.query("SHOW COLUMNS FROM users LIKE 'name'", (err, rows) => {
+        if (!err && rows.length === 0) {
+            console.log("🛠️ Adding missing 'name' column to users...");
+            db.query("ALTER TABLE users ADD COLUMN name VARCHAR(255) AFTER id", (err) => {
+                if (err) console.error("❌ CRITICAL: Failed to add 'name' column:", err.message);
+                else console.log("✅ Success: 'name' column added to users table.");
+            });
+        }
+    });
+
     // Handle column migrations for users (username -> mobile, isAdmin)
     db.query("SHOW COLUMNS FROM users LIKE 'mobile'", (err, rows) => {
         if (!err && rows.length === 0) {
@@ -192,13 +203,6 @@ const syncSchema = () => {
     // Run repair once everything is ready
     setTimeout(repairOldBets, 5000); 
 
-    db.query("SHOW COLUMNS FROM users LIKE 'name'", (err, rows) => {
-        if (!err && rows.length === 0) {
-            db.query("ALTER TABLE users ADD COLUMN name VARCHAR(255) AFTER id", (err) => {
-                if (err) console.error("Add name column error:", err.message);
-            });
-        }
-    });
 
     db.query("SHOW COLUMNS FROM users LIKE 'isAdmin'", (err, rows) => {
         if (!err && rows.length === 0) {
