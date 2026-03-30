@@ -663,9 +663,15 @@ app.get('/api/settings', (req, res) => {
 // Update Site Settings (Admin)
 app.put('/api/settings', (req, res) => {
     const { admin_upi, support_number, admin_qr } = req.body;
+    console.log(`📡 UPDATE SETTINGS: UPI=${admin_upi}, Support=${support_number}, QR_Length=${admin_qr ? admin_qr.length : 0}`);
+    
     db.query('UPDATE site_settings SET admin_upi = ?, support_number = ?, admin_qr = ? WHERE id = 1', 
     [admin_upi, support_number, admin_qr], (err, result) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
+        if (err) {
+            console.error("❌ SETTINGS UPDATE ERROR:", err.message);
+            return res.status(500).json({ error: 'Database error: ' + err.message });
+        }
+        console.log("✅ Settings updated successfully in DB.");
         res.json({ message: 'Settings updated successfully' });
     });
 });
