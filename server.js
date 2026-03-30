@@ -209,37 +209,20 @@ const repairOldBets = () => {
     });
 };
 
-db.getConnection((err, conn) => {
-    if (err) {
-        console.error('MySQL Connection Error:', err.message);
-        return;
-    }
+db.query("Connected to MySQL Database.", () => {
     console.log('Connected to MySQL Database.');
-
-    // --- AUTO-REPAIR DATABASE SCHEMA (REMOTE FIX) ---
-    console.log("🛠️ Checking Database Schema...");
-    syncSchema(); // Call it formally now
-
-    conn.query("SHOW COLUMNS FROM bets LIKE 'payoutDone'", (err, results) => {
-        if (!err && results.length === 0) {
-            console.log("🏗️ Repairing 'bets' table: Adding payoutDone...");
-            conn.query("ALTER TABLE bets ADD COLUMN payoutDone TINYINT(1) DEFAULT 0", () => {
-                conn.release();
-            });
-        } else {
-            conn.release();
-        }
-    });
-
-    // Run history repair once everything is ready
-    setTimeout(() => {
-        repairOldBets(); 
-        
-        // ONE-TIME FORCE SETTLE FOR ANDHRA DAY (RESTORE WINNINGS)
-        console.log("🏆 FORCING payout repair for yesterday's Andhra Day...");
-        settleBets("ANDHRA DAY", "100-01-010");
-    }, 5000);
 });
+
+// --- AUTO-REPAIR DATABASE SCHEMA ---
+syncSchema();
+
+// Repair functions
+setTimeout(() => {
+    repairOldBets(); 
+    // ONE-TIME FORCE SETTLE FOR ANDHRA DAY (RESTORE WINNINGS)
+    console.log("🏆 FORCING payout repair for yesterday's Andhra Day...");
+    settleBets("ANDHRA DAY", "100-01-010");
+}, 5000);
 
 
 // =======================
@@ -407,7 +390,7 @@ app.post('/api/signup', (req, res) => {
 app.post('/api/login', (req, res) => {
     const { mobile, password } = req.body;
     const query = `
-      SELECT id, mobile, mobile as name, balance, isAdmin, role, isBlocked as is_blocked 
+      SELECT id, mobile, mobile as name, balance, isAdmin, role, isBlocked, is_blocked 
       FROM users 
       WHERE mobile = ? AND password = ?
     `;
@@ -423,11 +406,14 @@ app.post('/api/login', (req, res) => {
         }
         
         const user = results[0];
-        if (user.is_blocked) {
+        // Check both potential block columns for absolute safety
+        if (user.isBlocked === 1 || user.is_blocked === 1) {
             return res.status(403).json({ error: 'Account Blocked! Please contact admin.' });
         }
         
-        res.json({ message: 'Login successful', user });
+        // Return a clean user object with a fallback name
+        const cleanUser = { ...user, name: user.name || user.mobile };
+        res.json({ message: 'Login successful', user: cleanUser });
     });
 });
 
@@ -605,6 +591,23 @@ const seedSettings = () => {
     });
 };
 seedSettings();
+
+// Get all user details (Sync Heartbeat)
+app.get('/api/users/:identifier/sync', (req, res) => {
+    const { identifier } = req.params;
+    const query = 'SELECT id, balance, isBlocked, is_blocked, role FROM users WHERE mobile = ? OR id = ?';
+    db.query(query, [identifier, identifier], (err, results) => {
+        if (err || results.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        const user = results[0];
+        res.json({
+            balance: user.balance,
+            is_blocked: (user.isBlocked === 1 || user.is_blocked === 1),
+            role: user.role
+        });
+    });
+});
 
 // Get Site Settings
 app.get('/api/settings', (req, res) => {
