@@ -511,9 +511,11 @@ app.post('/api/signup', (req, res) => {
     });
 });
 
-// Login
+// Login (Safe Mode: Fallback if name column missing)
 app.post('/api/login', (req, res) => {
     const { mobile, password } = req.body;
+    
+    // Attempt 1: Full select with name
     const query = `
       SELECT id, mobile, name, balance, isAdmin, role, isBlocked as is_blocked 
       FROM users 
@@ -522,22 +524,42 @@ app.post('/api/login', (req, res) => {
     
     db.query(query, [mobile, password], (err, results) => {
         if (err) {
-            console.error('SERVER LOGIN ERROR:', err);
-            return res.status(500).json({ error: 'Database error: ' + err.message });
+            console.error('SERVER LOGIN PRIMARY ERROR:', err.message);
+            
+            // If name is missing, fallback to mobile as name
+            if (err.message.includes("Unknown column 'name'")) {
+                console.log("⚠️ Fallback Login: 'name' column missing. Using mobile as name...");
+                const fallbackQuery = `
+                  SELECT id, mobile, mobile as name, balance, isAdmin, role, isBlocked as is_blocked 
+                  FROM users 
+                  WHERE mobile = ? AND password = ?
+                `;
+                db.query(fallbackQuery, [mobile, password], (fErr, fResults) => {
+                    if (fErr) return res.status(500).json({ error: 'Database error: ' + fErr.message });
+                    handleLoginResponse(fResults, res);
+                });
+            } else {
+                return res.status(500).json({ error: 'Database error: ' + err.message });
+            }
+        } else {
+            handleLoginResponse(results, res);
         }
-        
-        if (results.length === 0) {
-            return res.status(401).json({ error: 'Invalid mobile or password' });
-        }
-        
-        const user = results[0];
-        if (user.is_blocked) {
-            return res.status(403).json({ error: 'Account Blocked! Please contact admin.' });
-        }
-        
-        res.json({ message: 'Login successful', user });
     });
 });
+
+// Helper to handle login results
+const handleLoginResponse = (results, res) => {
+    if (results.length === 0) {
+        return res.status(401).json({ error: 'Invalid mobile or password' });
+    }
+    
+    const user = results[0];
+    if (user.is_blocked) {
+        return res.status(403).json({ error: 'Account Blocked! Please contact admin.' });
+    }
+    
+    res.json({ message: 'Login successful', user });
+};
 
 // =======================
 // WITHDRAWAL ENDPOINTS
