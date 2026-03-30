@@ -200,10 +200,10 @@ const syncSchema = () => {
         }
     });
 
-    // Handle is_blocked column
-    db.query("SHOW COLUMNS FROM users LIKE 'is_blocked'", (err, rows) => {
+    // Handle admin_qr column in site_settings
+    db.query("SHOW COLUMNS FROM site_settings LIKE 'admin_qr'", (err, rows) => {
         if (!err && rows.length === 0) {
-            db.query("ALTER TABLE users ADD COLUMN is_blocked BOOLEAN DEFAULT FALSE");
+            db.query("ALTER TABLE site_settings ADD COLUMN admin_qr TEXT");
         }
     });
 };
@@ -544,12 +544,22 @@ app.post('/api/withdrawals', (req, res) => {
 // NOTIFICATIONS ENDPOINTS
 // =======================
 
-// Get notifications
+// Fetch notifications
 app.get('/api/notifications', (req, res) => {
     const query = 'SELECT * FROM notifications ORDER BY created_at DESC';
     db.query(query, (err, results) => {
         if (err) return res.status(500).json({ error: 'Database error' });
         res.json(results);
+    });
+});
+
+// Fetch Latest Notification for Popup (v25)
+app.get('/api/notifications/latest', (req, res) => {
+    const query = 'SELECT * FROM notifications ORDER BY created_at DESC LIMIT 1';
+    db.query(query, (err, results) => {
+        if (err) return res.status(500).json({ error: 'Database error' });
+        if (results.length === 0) return res.json(null);
+        res.json(results[0]);
     });
 });
 
@@ -635,7 +645,11 @@ app.get('/api/users/:identifier/sync', (req, res) => {
 app.get('/api/settings', (req, res) => {
     db.query('SELECT * FROM site_settings WHERE id = 1', (err, results) => {
         if (err || results.length === 0) {
-            return res.json({ admin_upi: '3103624a@bandhan', support_number: '91XXXXXXXXXX' });
+            return res.json({ 
+                admin_upi: '3103624a@bandhan', 
+                support_number: '91XXXXXXXXXX',
+                admin_qr: '' 
+            });
         }
         res.json(results[0]);
     });
@@ -643,9 +657,9 @@ app.get('/api/settings', (req, res) => {
 
 // Update Site Settings (Admin)
 app.put('/api/settings', (req, res) => {
-    const { admin_upi, support_number } = req.body;
-    db.query('UPDATE site_settings SET admin_upi = ?, support_number = ? WHERE id = 1', 
-    [admin_upi, support_number], (err, result) => {
+    const { admin_upi, support_number, admin_qr } = req.body;
+    db.query('UPDATE site_settings SET admin_upi = ?, support_number = ?, admin_qr = ? WHERE id = 1', 
+    [admin_upi, support_number, admin_qr], (err, result) => {
         if (err) return res.status(500).json({ error: 'Database error' });
         res.json({ message: 'Settings updated successfully' });
     });
@@ -712,6 +726,23 @@ app.get('/api/users', (req, res) => {
     const query = 'SELECT id, mobile as name, mobile, balance, is_blocked, created_at FROM users WHERE isAdmin = 0 ORDER BY created_at DESC';
     db.query(query, (err, results) => {
         if (err) return res.status(500).json({ error: 'Database error' });
+        res.json(results);
+    });
+});
+
+// Admin: Get all betting history (v27)
+app.get('/api/admin/bets', (req, res) => {
+    const query = `
+        SELECT b.*, u.mobile 
+        FROM bets b 
+        LEFT JOIN users u ON b.user_id = u.id 
+        ORDER BY b.created_at DESC
+    `;
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error("Fetch all bets error:", err.message);
+            return res.status(500).json({ error: 'Database error' });
+        }
         res.json(results);
     });
 });
