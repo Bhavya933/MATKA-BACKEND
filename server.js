@@ -340,8 +340,8 @@ const settleBets = (game_name, inputNumber, callback) => {
     console.log(`🎯 Settling bets for ${game_name} with result ${number}`);
 
     // Robust Catch-all query for PENDING or Placed
-    // Robust Catch-all query for PENDING or Placed or incorrectly LOST bets
-    const query = 'SELECT * FROM bets WHERE TRIM(game_name) = ? AND (status = "Placed" OR UPPER(status) = "PENDING" OR UPPER(status) = "LOST") AND payoutDone = 0';
+    // Only settle bets from the last 24 hours to avoid session confusion
+    const query = 'SELECT * FROM bets WHERE TRIM(game_name) = ? AND (status = "Placed" OR UPPER(status) = "PENDING" OR UPPER(status) = "LOST") AND payoutDone = 0 AND created_at >= NOW() - INTERVAL 1 DAY';
     db.query(query, [game_name.trim()], (err, pendingBets) => {
         if (err) {
             console.error("Fetch pending bets error:", err.message);
@@ -352,13 +352,14 @@ const settleBets = (game_name, inputNumber, callback) => {
         if (!pendingBets || pendingBets.length === 0) {
             console.log(`No pending bets found for ${game_name}.`);
             // Even if no bets to settle, update the result_number for everyone else to keep history consistent
-            db.query('UPDATE bets SET result_number = ? WHERE TRIM(game_name) = ?', [number, game_name.trim()]);
+            // Only update history for the last 24 hours to keep history persistent
+            db.query('UPDATE bets SET result_number = ? WHERE TRIM(game_name) = ? AND created_at >= NOW() - INTERVAL 1 DAY', [number, game_name.trim()]);
             if (callback) callback({ message: 'No bets to settle' });
             return;
         }
 
-        // Broad update to ensure everyone (even already settled) sees the latest format
-        db.query('UPDATE bets SET result_number = ? WHERE TRIM(game_name) = ?', [number, game_name.trim()]);
+        // Broad update to ensure current sesssion (last 24h) history is consistent
+        db.query('UPDATE bets SET result_number = ? WHERE TRIM(game_name) = ? AND created_at >= NOW() - INTERVAL 1 DAY', [number, game_name.trim()]);
 
         const parts = (number || '').split('-');
         let openPanna = 'XXX', jodi = 'XX', closePanna = 'XXX';
