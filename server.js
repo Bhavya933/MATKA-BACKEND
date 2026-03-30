@@ -137,16 +137,6 @@ const syncSchema = () => {
         });
     });
 
-    // Remove the unused and empty 'name' column as requested
-    db.query("SHOW COLUMNS FROM users LIKE 'name'", (err, rows) => {
-        if (!err && rows.length > 0) {
-            console.log("Dropping unused 'name' column...");
-            db.query("ALTER TABLE users DROP COLUMN name", (err) => {
-                if (err) console.error("Error dropping name column:", err.message);
-            });
-        }
-    });
-
     // Handle column migrations for users (username -> mobile, isAdmin)
     db.query("SHOW COLUMNS FROM users LIKE 'mobile'", (err, rows) => {
         if (!err && rows.length === 0) {
