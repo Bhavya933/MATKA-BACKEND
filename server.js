@@ -55,7 +55,6 @@ const syncSchema = () => {
     const tables = [
         `CREATE TABLE IF NOT EXISTS users (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            name VARCHAR(255),
             mobile VARCHAR(15) UNIQUE NOT NULL,
             password VARCHAR(255) NOT NULL,
             isAdmin TINYINT(1) DEFAULT 0,
@@ -135,17 +134,6 @@ const syncSchema = () => {
         db.query(sql, (err) => {
             if (err) console.error('Error creating table:', err.message);
         });
-    });
-
-    // --- PRIORITY MIGRATIONS ---
-    db.query("SHOW COLUMNS FROM users LIKE 'name'", (err, rows) => {
-        if (!err && rows.length === 0) {
-            console.log("🛠️ Adding missing 'name' column to users...");
-            db.query("ALTER TABLE users ADD COLUMN name VARCHAR(255) AFTER id", (err) => {
-                if (err) console.error("❌ CRITICAL: Failed to add 'name' column:", err.message);
-                else console.log("✅ Success: 'name' column added to users table.");
-            });
-        }
     });
 
     // Handle column migrations for users (username -> mobile, isAdmin)
@@ -480,70 +468,45 @@ const settleBets = (game_name, inputNumber, callback) => {
 // =======================
 
 // Sign Up
-// Signup (Safe Mode: Fallback if name column missing)
+// Sign Up
 app.post('/api/signup', (req, res) => {
-    const { name, mobile, password } = req.body;
-    
-    // Attempt 1: Full insert with name
-    const query = 'INSERT INTO users (name, mobile, password, isAdmin) VALUES (?, ?, ?, 0)';
-    db.query(query, [name, mobile, password], (err, result) => {
+    const { mobile, password } = req.body;
+    const query = 'INSERT INTO users (mobile, password, isAdmin) VALUES (?, ?, 0)';
+    db.query(query, [mobile, password], (err, result) => {
         if (err) {
-            console.error('Signup Primary Error:', err.message);
-            
-            // If the error is "Unknown column 'name'", try fallback without name
-            if (err.message.includes("Unknown column 'name'")) {
-                console.log("⚠️ Fallback: 'name' column missing. Registering without name...");
-                const fallbackQuery = 'INSERT INTO users (mobile, password, isAdmin) VALUES (?, ?, 0)';
-                db.query(fallbackQuery, [mobile, password], (fErr, fResult) => {
-                    if (fErr) {
-                        if (fErr.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'Mobile number already exists' });
-                        return res.status(500).json({ error: 'Database error: ' + fErr.message });
-                    }
-                    return res.json({ message: 'User registered successfully (Fallback Mode)', id: fResult.insertId });
-                });
-            } else {
-                if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'Mobile number already exists' });
-                return res.status(500).json({ error: 'Database error: ' + err.message });
-            }
-        } else {
-            res.json({ message: 'User registered successfully', id: result.insertId });
+            console.error('Signup Error:', err);
+            if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'Mobile number already exists' });
+            return res.status(500).json({ error: 'Database error: ' + err.message });
         }
+        res.json({ message: 'User registered successfully', id: result.insertId });
     });
 });
 
-// Login (Safe Mode: Fallback if name column missing)
+// Login
 app.post('/api/login', (req, res) => {
     const { mobile, password } = req.body;
-    
-    // Attempt 1: Full select with name
     const query = `
-      SELECT id, mobile, name, balance, isAdmin, role, isBlocked as is_blocked 
+      SELECT id, mobile, mobile as name, balance, isAdmin, role, isBlocked as is_blocked 
       FROM users 
       WHERE mobile = ? AND password = ?
     `;
     
     db.query(query, [mobile, password], (err, results) => {
         if (err) {
-            console.error('SERVER LOGIN PRIMARY ERROR:', err.message);
-            
-            // If name is missing, fallback to mobile as name
-            if (err.message.includes("Unknown column 'name'")) {
-                console.log("⚠️ Fallback Login: 'name' column missing. Using mobile as name...");
-                const fallbackQuery = `
-                  SELECT id, mobile, mobile as name, balance, isAdmin, role, isBlocked as is_blocked 
-                  FROM users 
-                  WHERE mobile = ? AND password = ?
-                `;
-                db.query(fallbackQuery, [mobile, password], (fErr, fResults) => {
-                    if (fErr) return res.status(500).json({ error: 'Database error: ' + fErr.message });
-                    handleLoginResponse(fResults, res);
-                });
-            } else {
-                return res.status(500).json({ error: 'Database error: ' + err.message });
-            }
-        } else {
-            handleLoginResponse(results, res);
+            console.error('SERVER LOGIN ERROR:', err);
+            return res.status(500).json({ error: 'Database error: ' + err.message });
         }
+        
+        if (results.length === 0) {
+            return res.status(401).json({ error: 'Invalid mobile or password' });
+        }
+        
+        const user = results[0];
+        if (user.is_blocked) {
+            return res.status(403).json({ error: 'Account Blocked! Please contact admin.' });
+        }
+        
+        res.json({ message: 'Login successful', user });
     });
 });
 
