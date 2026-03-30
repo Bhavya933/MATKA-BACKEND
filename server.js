@@ -300,31 +300,32 @@ const settleBets = (game_name, inputNumber, callback) => {
             }
 
             const bet = pendingBets[processed++];
-            let outcome = 'PENDING';
-            let multiplier = 9;
+            const gt = String(bet.game_type || '').toLowerCase().trim();
             const betNumber = String(bet.number || '').trim();
+            let outcome = 'PENDING';
+            let multiplier = 10; // Default to 10 for safety
 
             try {
-                if (bet.game_type === 'Single Digit') {
+                if (gt.includes('single digit')) {
                     multiplier = 10;
                     if (bet.session === 'OPEN' && isOpenDigitDeclared) outcome = (betNumber === openDigit) ? 'Won' : 'Lost';
                     else if (bet.session === 'CLOSE' && isCloseDigitDeclared) outcome = (betNumber === closeDigit) ? 'Won' : 'Lost';
-                } else if (bet.game_type === 'Double Digit (Jodi)') {
+                } else if (gt.includes('double digit') || gt.includes('jodi')) {
                     multiplier = 100;
                     if (isJodiDeclared) outcome = (betNumber === jodi) ? 'Won' : 'Lost';
-                } else if (bet.game_type === 'Single Panna') {
+                } else if (gt.includes('single panna')) {
                     multiplier = 160;
                     if (bet.session === 'OPEN' && isOpenPannaDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
                     else if (bet.session === 'CLOSE' && isClosePannaDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
-                } else if (bet.game_type === 'Double Panna') {
+                } else if (gt.includes('double panna')) {
                     multiplier = 320;
                     if (bet.session === 'OPEN' && isOpenPannaDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
                     else if (bet.session === 'CLOSE' && isClosePannaDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
-                } else if (bet.game_type === 'Triple Panna') {
+                } else if (gt.includes('triple panna')) {
                     multiplier = 700;
                     if (bet.session === 'OPEN' && isOpenPannaDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
                     else if (bet.session === 'CLOSE' && isClosePannaDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
-                } else if (bet.game_type === 'Half Sangam') {
+                } else if (gt.includes('half sangam')) {
                     multiplier = 1000;
                     const bParts = betNumber.split(/[x×]/);
                     if (bParts.length >= 2) {
@@ -334,7 +335,7 @@ const settleBets = (game_name, inputNumber, callback) => {
                            outcome = (bParts[0].trim() === closePanna && bParts[1].trim() === openDigit) ? 'Won' : 'Lost';
                         }
                     }
-                } else if (bet.game_type === 'Full Sangam') {
+                } else if (gt.includes('full sangam')) {
                     multiplier = 10000;
                     const bParts = betNumber.split(/[x×]/);
                     if (bParts.length >= 2 && isOpenPannaDeclared && isClosePannaDeclared) {
@@ -974,4 +975,3 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
-
