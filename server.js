@@ -913,37 +913,36 @@ app.delete('/api/users/:userId/accounts/:accountId', (req, res) => {
 app.post('/api/bets', (req, res) => {
     const { user_mobile, game_name, game_type, session, number, points } = req.body;
 
-    db.getConnection((err, conn) => {
-        if (err) return res.status(500).json({ error: 'Database Connection Error: ' + err.message });
+    // 1. Check Balance first
+    db.query('SELECT id, balance FROM users WHERE mobile = ?', [user_mobile], (err, results) => {
+        if (err) return res.status(500).json({ error: 'DB Error: ' + err.message });
+        if (results.length === 0) return res.status(404).json({ error: 'User not found' });
 
-        conn.beginTransaction(err => {
-            if (err) { conn.release(); return res.status(500).json({ error: 'Trans Begin Error: ' + err.message }); }
+        const userId = results[0].id;
+        const balance = results[0].balance;
+        
+        if (balance < points) {
+            return res.status(400).json({ error: 'Insufficient Balance. Recharge to play!' });
+        }
 
-            // 1. Check Balance
-            conn.query('SELECT id, balance FROM users WHERE mobile = ?', [user_mobile], (err, results) => {
-                if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Check Bal Error: ' + err.message }); });
-                if (results.length === 0) return conn.rollback(() => { conn.release(); res.status(404).json({ error: 'User not found' }); });
+        // 2. Atomic Update: Only subtract if balance is sufficient (double check in SQL)
+        db.query('UPDATE users SET balance = balance - ? WHERE mobile = ? AND balance >= ?', [points, user_mobile, points], (uErr, uRes) => {
+            if (uErr) return res.status(500).json({ error: 'Balance Update Failed' });
+            
+            if (uRes.affectedRows === 0) {
+                return res.status(400).json({ error: 'Insufficient Balance (Race Condition)' });
+            }
 
-                const userId = results[0].id;
-                const balance = results[0].balance;
-                if (balance < points) return conn.rollback(() => { conn.release(); res.status(400).json({ error: 'Insufficient Balance' }); });
-
-                // 2. Subtract Balance
-                conn.query('UPDATE users SET balance = balance - ? WHERE mobile = ?', [points, user_mobile], (err, results) => {
-                    if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Update Bal Error: ' + err.message }); });
-
-                    // 3. Insert Bet - Using the correct database ENUM values (PENDING, WON, LOST)
-                    const betSql = 'INSERT INTO bets (user_id, user_mobile, game_name, game_type, session, number, points, status) VALUES (?, ?, ?, ?, ?, ?, ?, "PENDING")';
-                    conn.query(betSql, [userId, user_mobile, game_name, game_type, session, number, points], (err, results) => {
-                        if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Insert Bet Error: ' + err.message }); });
-
-                        conn.commit(err => {
-                            if (err) return conn.rollback(() => { conn.release(); res.status(500).json({ error: 'Commit Error: ' + err.message }); });
-                            conn.release();
-                            res.json({ message: 'Bet placed successfully', balance: balance - points });
-                        });
-                    });
-                });
+            // 3. Insert Bet
+            const betSql = 'INSERT INTO bets (user_id, user_mobile, game_name, game_type, session, number, points, status) VALUES (?, ?, ?, ?, ?, ?, ?, "PENDING")';
+            db.query(betSql, [userId, user_mobile, game_name, game_type, session, number, points], (bErr) => {
+                if (bErr) {
+                    // Critical: Try to refund if bet insert fails
+                    db.query('UPDATE users SET balance = balance + ? WHERE mobile = ?', [points, user_mobile]);
+                    return res.status(500).json({ error: 'Bet Recording Failed' });
+                }
+                
+                res.json({ message: 'Bet placed successfully!', newBalance: balance - points });
             });
         });
     });
