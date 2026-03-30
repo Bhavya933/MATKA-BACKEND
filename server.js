@@ -55,6 +55,7 @@ const syncSchema = () => {
     const tables = [
         `CREATE TABLE IF NOT EXISTS users (
             id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(255),
             mobile VARCHAR(15) UNIQUE NOT NULL,
             password VARCHAR(255) NOT NULL,
             isAdmin TINYINT(1) DEFAULT 0,
@@ -200,6 +201,14 @@ const syncSchema = () => {
 
     // Run repair once everything is ready
     setTimeout(repairOldBets, 5000); 
+
+    db.query("SHOW COLUMNS FROM users LIKE 'name'", (err, rows) => {
+        if (!err && rows.length === 0) {
+            db.query("ALTER TABLE users ADD COLUMN name VARCHAR(255) AFTER id", (err) => {
+                if (err) console.error("Add name column error:", err.message);
+            });
+        }
+    });
 
     db.query("SHOW COLUMNS FROM users LIKE 'isAdmin'", (err, rows) => {
         if (!err && rows.length === 0) {
@@ -494,7 +503,7 @@ app.post('/api/signup', (req, res) => {
 app.post('/api/login', (req, res) => {
     const { mobile, password } = req.body;
     const query = `
-      SELECT id, mobile, mobile as name, balance, isAdmin, role, isBlocked as is_blocked 
+      SELECT id, mobile, name, balance, isAdmin, role, isBlocked as is_blocked 
       FROM users 
       WHERE mobile = ? AND password = ?
     `;
