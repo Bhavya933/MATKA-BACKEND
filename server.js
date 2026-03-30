@@ -39,13 +39,16 @@ const resetGamesForNewDay = () => {
     });
 };
 
-// Check every minute if it's 12:00 AM
+// Check every 30 seconds if it's 12:00 AM (Ensure it only runs ONCE per day)
+let lastResetDay = null;
 setInterval(() => {
     const now = new Date();
-    if (now.getHours() === 0 && now.getMinutes() === 0) {
+    const todayStr = now.toDateString();
+    if (now.getHours() === 0 && now.getMinutes() === 0 && lastResetDay !== todayStr) {
+        lastResetDay = todayStr;
         resetGamesForNewDay();
     }
-}, 60000); 
+}, 30000); 
 
 // Helper to sync database schema automatically
 const syncSchema = () => {
@@ -316,8 +319,7 @@ db.getConnection((err, conn) => {
         conn.release();
     });
 
-    // Start Reset interval
-    setInterval(resetGamesForNewDay, 60000); 
+    // Reset logic is now centrally managed at the top of this file
     repairOldBets(); 
     
     // ONE-TIME FORCE SETTLE FOR ANDHRA DAY (RESTORE WINNINGS)
