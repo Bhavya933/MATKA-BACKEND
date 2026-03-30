@@ -640,13 +640,20 @@ app.get('/api/notifications', (req, res) => {
     });
 });
 
-// Create notification
+// Create notification (Single Notification Mode: Always clears old one)
 app.post('/api/notifications', (req, res) => {
     const { title, message, audience, type } = req.body;
-    const query = 'INSERT INTO notifications (title, message, audience, type) VALUES (?, ?, ?, ?)';
-    db.query(query, [title, message, audience, type], (err, result) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
-        res.json({ message: 'Notification sent successfully' });
+    
+    // First, clear previous notifications
+    db.query('DELETE FROM notifications', (delErr) => {
+        if (delErr) console.error("Notification Clear Error:", delErr);
+        
+        // Then, insert the new one
+        const query = 'INSERT INTO notifications (title, message, audience, type) VALUES (?, ?, ?, ?)';
+        db.query(query, [title, message, audience, type], (err, result) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json({ message: 'Notification sent successfully' });
+        });
     });
 });
 
