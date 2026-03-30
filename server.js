@@ -480,16 +480,34 @@ const settleBets = (game_name, inputNumber, callback) => {
 // =======================
 
 // Sign Up
+// Signup (Safe Mode: Fallback if name column missing)
 app.post('/api/signup', (req, res) => {
     const { name, mobile, password } = req.body;
+    
+    // Attempt 1: Full insert with name
     const query = 'INSERT INTO users (name, mobile, password, isAdmin) VALUES (?, ?, ?, 0)';
     db.query(query, [name, mobile, password], (err, result) => {
         if (err) {
-            console.error('Signup Error:', err);
-            if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'Mobile number already exists' });
-            return res.status(500).json({ error: 'Database error: ' + err.message });
+            console.error('Signup Primary Error:', err.message);
+            
+            // If the error is "Unknown column 'name'", try fallback without name
+            if (err.message.includes("Unknown column 'name'")) {
+                console.log("⚠️ Fallback: 'name' column missing. Registering without name...");
+                const fallbackQuery = 'INSERT INTO users (mobile, password, isAdmin) VALUES (?, ?, 0)';
+                db.query(fallbackQuery, [mobile, password], (fErr, fResult) => {
+                    if (fErr) {
+                        if (fErr.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'Mobile number already exists' });
+                        return res.status(500).json({ error: 'Database error: ' + fErr.message });
+                    }
+                    return res.json({ message: 'User registered successfully (Fallback Mode)', id: fResult.insertId });
+                });
+            } else {
+                if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'Mobile number already exists' });
+                return res.status(500).json({ error: 'Database error: ' + err.message });
+            }
+        } else {
+            res.json({ message: 'User registered successfully', id: result.insertId });
         }
-        res.json({ message: 'User registered successfully', id: result.insertId });
     });
 });
 
