@@ -164,126 +164,48 @@ const syncSchema = () => {
             db.query("UPDATE bets SET status = 'PENDING' WHERE status = 'Placed'", (err) => {
                 if (err) console.error("Error migrating 'Placed' to 'PENDING':", err.message);
             });
-            db.query("UPDATE bets SET status = 'WON' WHERE status = 'Won'", (err) => {
-                if (err) console.error("Error migrating 'Won' to 'WON':", err.message);
-            });
-            db.query("UPDATE bets SET status = 'LOST' WHERE status = 'Lost'", (err) => {
-                if (err) console.error("Error migrating 'Lost' to 'LOST':", err.message);
-                if (err) console.error("Error migrating 'Lost' to 'WON':", err.message);
-            });
+            db.query("UPDATE bets SET status = 'WON' WHERE status = 'Won'");
+            db.query("UPDATE bets SET status = 'LOST' WHERE status = 'Lost'");
         }
     });
-
-    // --- REPAIR OLD HISTORY AUTOMATICALLY ---
-    const repairOldBets = () => {
-        console.log("🛠️ Starting History Repair (Final Payout)...");
-        // Only select those that are NOT already Won/Lost
-        db.query("SELECT TRIM(name) as name, number FROM games WHERE number != 'XXX-XX-XXX'", (err, games) => {
-            if (!err && games.length > 0) {
-                games.forEach(g => {
-                    console.log(`Checking history for: ${g.name} (${g.number})`);
-                    settleBets(g.name.trim(), g.number);
-                });
-            }
-        });
-    };
-
-    // Run repair once everything is ready
-    setTimeout(repairOldBets, 5000); 
-
 
     db.query("SHOW COLUMNS FROM users LIKE 'isAdmin'", (err, rows) => {
         if (!err && rows.length === 0) {
-            db.query("ALTER TABLE users ADD COLUMN isAdmin TINYINT(1) DEFAULT 0", (err) => {
-                if (err) console.error("Add isAdmin column error:", err.message);
-            });
+            db.query("ALTER TABLE users ADD COLUMN isAdmin TINYINT(1) DEFAULT 0");
         }
     });
 
-    // Migration for bets table (user_id -> user_mobile)
     db.query("SHOW COLUMNS FROM bets LIKE 'user_mobile'", (err, rows) => {
         if (!err && rows.length === 0) {
-            console.log("No 'user_mobile' column in 'bets', checking for 'user_id'...");
             db.query("SHOW COLUMNS FROM bets LIKE 'user_id'", (err, uRows) => {
                 if (!err && uRows.length > 0) {
-                    console.log("Adding user_mobile column and migrating data from user_id...");
-                    // Add column first
                     db.query("ALTER TABLE bets ADD COLUMN user_mobile VARCHAR(15)", (err) => {
-                        if (err) {
-                            console.error("Add user_mobile Error:", err.message);
-                        } else {
-                            // Update values from users table
-                            db.query("UPDATE bets b JOIN users u ON b.user_id = u.id SET b.user_mobile = u.mobile", (err) => {
-                                if (err) console.error("Data Migration Error:", err.message);
-                                else console.log("Successfully migrated user IDs to mobile numbers in bets table.");
-                            });
-                        }
-                    });
-                } else {
-                    console.log("Adding user_mobile column (no user_id found)...");
-                    db.query("ALTER TABLE bets ADD COLUMN user_mobile VARCHAR(15) NOT NULL", (err) => {
-                        if (err) console.error("Add user_mobile Error:", err.message);
+                        if (!err) db.query("UPDATE bets b JOIN users u ON b.user_id = u.id SET b.user_mobile = u.mobile");
                     });
                 }
             });
         }
     });
 
-    // Ensure digit column is named 'number' if it exists as digit (legacy support)
-    db.query("SHOW COLUMNS FROM bets LIKE 'number'", (err, rows) => {
-        if (!err && rows.length === 0) {
-            db.query("SHOW COLUMNS FROM bets LIKE 'digit'", (err, dRows) => {
-                if (!err && dRows.length > 0) {
-                    db.query("ALTER TABLE bets CHANGE digit number VARCHAR(100) NOT NULL", (err) => {
-                        if (err) console.error("Rename digit to number Error:", err.message);
-                    });
-                }
-            });
-        }
-    });
-
-    // Handle column-level migration for is_blocked
+    // Handle is_blocked column
     db.query("SHOW COLUMNS FROM users LIKE 'is_blocked'", (err, rows) => {
         if (!err && rows.length === 0) {
-            db.query("ALTER TABLE users ADD COLUMN is_blocked BOOLEAN DEFAULT FALSE", (err) => {
-                if (err) console.error("Could not add is_blocked column:", err.message);
-                else console.log("Added is_blocked column to users table.");
-            });
+            db.query("ALTER TABLE users ADD COLUMN is_blocked BOOLEAN DEFAULT FALSE");
         }
     });
+};
 
-    // Handle isBlocked (for dashboard compat)
-    db.query("SHOW COLUMNS FROM users LIKE 'isBlocked'", (err, rows) => {
-        if (!err && rows.length === 0) {
-            db.query("ALTER TABLE users ADD COLUMN isBlocked TINYINT(1) DEFAULT 0", (err) => {
-                if (err) console.error("Could not add isBlocked column:", err.message);
+// --- REPAIR OLD HISTORY AUTOMATICALLY ---
+const repairOldBets = () => {
+    console.log("🛠️ Starting History Repair (Final Payout)...");
+    // Only select those that are NOT already Won/Lost
+    db.query("SELECT TRIM(name) as name, number FROM games WHERE number != 'XXX-XX-XXX'", (err, games) => {
+        if (!err && games.length > 0) {
+            games.forEach(g => {
+                console.log(`Checking history for: ${g.name} (${g.number})`);
+                settleBets(g.name.trim(), g.number);
             });
         }
-    });
-
-    // Handle withdrawals ID type migration (INT -> VARCHAR for custom strings)
-    db.query("SHOW COLUMNS FROM withdrawals LIKE 'id'", (err, rows) => {
-        if (!err && rows.length > 0 && rows[0].Type.toLowerCase().includes('int')) {
-            console.log("Migrating withdrawals ID column to VARCHAR...");
-            db.query("ALTER TABLE withdrawals MODIFY id VARCHAR(100)", (err) => {
-                if (err) console.error("Could not migrate withdrawals ID column:", err.message);
-                else console.log("Migrated withdrawals ID column to VARCHAR.");
-            });
-        }
-    });
-
-    // Handle deposits schema migration
-    db.query("SHOW COLUMNS FROM deposits LIKE 'method'", (err, rows) => {
-        if (!err && rows.length === 0) {
-            db.query("ALTER TABLE deposits ADD COLUMN method VARCHAR(50) DEFAULT 'GPAY', ADD COLUMN utr_id VARCHAR(100)", (err) => {
-                if (!err) console.log("Updated deposits table schema (Added method and utr_id columns).");
-            });
-        }
-    });
-
-    // Update balance column precision
-    db.query("ALTER TABLE users MODIFY COLUMN balance DECIMAL(15, 2) DEFAULT 0.00", (err) => {
-        if (err) console.error("Balance precision update error:", err.message);
     });
 };
 
@@ -296,25 +218,24 @@ db.getConnection((err, conn) => {
 
     // --- AUTO-REPAIR DATABASE SCHEMA (REMOTE FIX) ---
     console.log("🛠️ Checking Database Schema...");
+    syncSchema(); // Call it formally now
+
     conn.query("SHOW COLUMNS FROM bets LIKE 'payoutDone'", (err, results) => {
         if (!err && results.length === 0) {
             console.log("🏗️ Repairing 'bets' table: Adding payoutDone...");
-            conn.query("ALTER TABLE bets ADD COLUMN payoutDone TINYINT(1) DEFAULT 0");
+            conn.query("ALTER TABLE bets ADD COLUMN payoutDone TINYINT(1) DEFAULT 0", () => {
+                conn.release();
+            });
+        } else {
+            conn.release();
         }
-    });
-    conn.query("SHOW COLUMNS FROM bets LIKE 'result_number'", (err, results) => {
-        if (!err && results.length === 0) {
-            console.log("🏗️ Repairing 'bets' table: Adding result_number...");
-            conn.query("ALTER TABLE bets ADD COLUMN result_number VARCHAR(20) DEFAULT NULL");
-        }
-        conn.release();
     });
 
-    // Reset logic is now centrally managed at the top of this file
-    repairOldBets(); 
-    
-    // ONE-TIME FORCE SETTLE FOR ANDHRA DAY (RESTORE WINNINGS)
+    // Run history repair once everything is ready
     setTimeout(() => {
+        repairOldBets(); 
+        
+        // ONE-TIME FORCE SETTLE FOR ANDHRA DAY (RESTORE WINNINGS)
         console.log("🏆 FORCING payout repair for yesterday's Andhra Day...");
         settleBets("ANDHRA DAY", "100-01-010");
     }, 5000);
@@ -509,20 +430,6 @@ app.post('/api/login', (req, res) => {
         res.json({ message: 'Login successful', user });
     });
 });
-
-// Helper to handle login results
-const handleLoginResponse = (results, res) => {
-    if (results.length === 0) {
-        return res.status(401).json({ error: 'Invalid mobile or password' });
-    }
-    
-    const user = results[0];
-    if (user.is_blocked) {
-        return res.status(403).json({ error: 'Account Blocked! Please contact admin.' });
-    }
-    
-    res.json({ message: 'Login successful', user });
-};
 
 // =======================
 // WITHDRAWAL ENDPOINTS
