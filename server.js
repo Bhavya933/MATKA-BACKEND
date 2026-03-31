@@ -780,6 +780,18 @@ app.get('/api/admin/bets', (req, res) => {
     });
 });
 
+// Admin: Manual balance edit
+app.put('/api/users/:id/balance', (req, res) => {
+    const { id } = req.params;
+    const { balance } = req.body;
+    if (balance === undefined || isNaN(balance)) return res.status(400).json({ error: 'Invalid balance amount' });
+    
+    db.query('UPDATE users SET balance = ? WHERE id = ?', [balance, id], (err, result) => {
+        if (err) return res.status(500).json({ error: 'Database error' });
+        res.json({ message: 'Balance updated successfully' });
+    });
+});
+
 // Admin: Toggle block status
 app.put('/api/users/:id/toggle-block', (req, res) => {
     const { id } = req.params;
