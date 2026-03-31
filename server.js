@@ -131,6 +131,14 @@ const syncSchema = () => {
             admin_upi VARCHAR(255) DEFAULT '3103624a@bandhan',
             support_number VARCHAR(20) DEFAULT '91XXXXXXXXXX',
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )`,
+        `CREATE TABLE IF NOT EXISTS results (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            game_name VARCHAR(100) NOT NULL,
+            result_date DATE NOT NULL,
+            number VARCHAR(20) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY unique_result (game_name, result_date)
         )`
     ];
 
@@ -676,6 +684,16 @@ app.put('/api/settings', (req, res) => {
     });
 });
 
+// Get results for a specific game (Chart History)
+app.get('/api/results/:gameName', (req, res) => {
+    const { gameName } = req.params;
+    const query = 'SELECT * FROM results WHERE game_name = ? ORDER BY result_date DESC LIMIT 70';
+    db.query(query, [gameName], (err, results) => {
+        if (err) return res.status(500).json({ error: 'Database error' });
+        res.json(results);
+    });
+});
+
 // Get all games
 app.get('/api/games', (req, res) => {
     db.query('SELECT * FROM games ORDER BY id ASC', (err, results) => {
@@ -702,8 +720,12 @@ app.put('/api/games/:id', (req, res) => {
     db.query(query, [name, number, open_time, close_time, status, id], (err, result) => {
         if (err) return res.status(500).json({ error: 'Database error: ' + err.message });
         
-        // AUTO-FINALIZE: Automatically settle bets when number is updated
+        // AUTO-HISTORY: Save to results if number is updated
         if (number && number !== 'XXX-XX-XXX') {
+            const resultDate = new Date().toISOString().slice(0, 10);
+            db.query('INSERT INTO results (game_name, result_date, number) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE number = ?', 
+            [name, resultDate, number, number]);
+            
             settleBets(name, number, (settleRes) => {
                 console.log(`Auto-settled bets for ${name}:`, settleRes ? settleRes.message : 'Done');
             });
@@ -993,8 +1015,17 @@ app.post('/api/bets', (req, res) => {
 // Declare Result Route (Manual Trigger)
 app.post('/api/declare-result', (req, res) => {
     const { game_name, number } = req.body;
+    const resultDate = new Date().toISOString().slice(0, 10);
+    
+    // 1. Update Game
     db.query('UPDATE games SET number = ? WHERE name = ?', [number, game_name], (err, results) => {
         if (err) return res.status(500).json({ error: err.message });
+        
+        // 2. Save to History
+        db.query('INSERT INTO results (game_name, result_date, number) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE number = ?', 
+        [game_name, resultDate, number, number]);
+
+        // 3. Settle Bets
         settleBets(game_name, number, (settleRes) => {
             if (settleRes.error) return res.status(500).json({ error: settleRes.error });
             res.json(settleRes);
