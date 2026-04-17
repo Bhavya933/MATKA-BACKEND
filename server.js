@@ -32,11 +32,33 @@ const db = mysql.createPool({
 });
 
 // --- MIDNIGHT RESET ENGINE ---
+// --- MIDNIGHT RESET ENGINE ---
 const resetGamesForNewDay = () => {
-    console.log("🕛 MIDNIGHT RESET: Clearing all games for the new day...");
-    db.query("UPDATE games SET number = 'XXX-XX-XXX', status = 'OPEN'", (err) => {
-        if (err) console.error("Midnight reset failed:", err.message);
-        else console.log("✅ All games reset to OPEN.");
+    // Check setting before resetting
+    db.query('SELECT auto_reset_midnight FROM site_settings WHERE id = 1', (err, results) => {
+        if (!err && results.length > 0 && results[0].auto_reset_midnight === 0) {
+            console.log("🚫 MIDNIGHT RESET skip: Feature is DISABLED in settings.");
+            return;
+        }
+
+        console.log("🕛 MIDNIGHT RESET: Clearing all games for the new day...");
+        db.query("UPDATE games SET number = 'XXX-XX-XXX', status = 'OPEN'", (err) => {
+            if (err) console.error("Midnight reset failed:", err.message);
+            else {
+                console.log("✅ All games reset to OPEN.");
+                // Cleanup old results (> 30 days)
+                db.query("DELETE FROM results WHERE result_date < DATE_SUB(CURDATE(), INTERVAL 1 MONTH)", (delErr) => {
+                    if (delErr) console.error("Old results cleanup failed:", delErr.message);
+                    else console.log("🗑️ Old results cleaned up successfully.");
+                });
+
+                // Cleanup old bets (> 30 days) to keep DB light if needed
+                db.query("DELETE FROM bets WHERE created_at < DATE_SUB(NOW(), INTERVAL 1 MONTH)", (delErr) => {
+                    if (delErr) console.error("Old bets cleanup failed:", delErr.message);
+                    else console.log("🗑️ Old bets cleaned up successfully.");
+                });
+            }
+        });
     });
 };
 
@@ -130,6 +152,7 @@ const syncSchema = () => {
             id INT PRIMARY KEY DEFAULT 1,
             admin_upi VARCHAR(255) DEFAULT '3103624a@bandhan',
             support_number VARCHAR(20) DEFAULT '91XXXXXXXXXX',
+            auto_reset_midnight TINYINT(1) DEFAULT 1,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         )`,
         `CREATE TABLE IF NOT EXISTS results (
@@ -215,8 +238,15 @@ const syncSchema = () => {
             db.query("ALTER TABLE site_settings ADD COLUMN admin_qr LONGTEXT");
         } else if (!err && rows.length > 0 && rows[0].Type !== 'longtext') {
             // Upgrade existing TEXT to LONGTEXT
-            console.log("Upgrading admin_qr column to LONGTEXT for high-res images...");
             db.query("ALTER TABLE site_settings MODIFY COLUMN admin_qr LONGTEXT");
+        }
+    });
+
+    // Handle auto_reset_midnight column (Migration)
+    db.query("SHOW COLUMNS FROM site_settings LIKE 'auto_reset_midnight'", (err, rows) => {
+        if (!err && rows.length === 0) {
+            console.log("Adding auto_reset_midnight column to site_settings...");
+            db.query("ALTER TABLE site_settings ADD COLUMN auto_reset_midnight TINYINT(1) DEFAULT 1");
         }
     });
 };
@@ -661,7 +691,8 @@ app.get('/api/settings', (req, res) => {
             return res.json({ 
                 admin_upi: '3103624a@bandhan', 
                 support_number: '91XXXXXXXXXX',
-                admin_qr: '' 
+                admin_qr: '',
+                auto_reset_midnight: 1
             });
         }
         res.json(results[0]);
@@ -670,11 +701,11 @@ app.get('/api/settings', (req, res) => {
 
 // Update Site Settings (Admin)
 app.put('/api/settings', (req, res) => {
-    const { admin_upi, support_number, admin_qr } = req.body;
-    console.log(`📡 UPDATE SETTINGS: UPI=${admin_upi}, Support=${support_number}, QR_Length=${admin_qr ? admin_qr.length : 0}`);
+    const { admin_upi, support_number, admin_qr, auto_reset_midnight } = req.body;
+    console.log(`📡 UPDATE SETTINGS: UPI=${admin_upi}, Support=${support_number}, AutoReset=${auto_reset_midnight}, QR_Length=${admin_qr ? admin_qr.length : 0}`);
     
-    db.query('UPDATE site_settings SET admin_upi = ?, support_number = ?, admin_qr = ? WHERE id = 1', 
-    [admin_upi, support_number, admin_qr], (err, result) => {
+    db.query('UPDATE site_settings SET admin_upi = ?, support_number = ?, admin_qr = ?, auto_reset_midnight = ? WHERE id = 1', 
+    [admin_upi, support_number, admin_qr, auto_reset_midnight !== undefined ? auto_reset_midnight : 1], (err, result) => {
         if (err) {
             console.error("❌ SETTINGS UPDATE ERROR:", err.message);
             return res.status(500).json({ error: 'Database error: ' + err.message });
@@ -684,10 +715,10 @@ app.put('/api/settings', (req, res) => {
     });
 });
 
-// Get results for a specific game (Chart History)
+// Get results for a specific game (Chart History - Last 1 Month)
 app.get('/api/results/:gameName', (req, res) => {
     const { gameName } = req.params;
-    const query = 'SELECT * FROM results WHERE game_name = ? ORDER BY result_date DESC LIMIT 70';
+    const query = 'SELECT * FROM results WHERE game_name = ? AND result_date >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) ORDER BY result_date DESC';
     db.query(query, [gameName], (err, results) => {
         if (err) return res.status(500).json({ error: 'Database error' });
         res.json(results);
