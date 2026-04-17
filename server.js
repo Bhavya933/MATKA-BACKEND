@@ -28,7 +28,10 @@ const db = mysql.createPool({
     host: process.env.DB_HOST || 'localhost',
     user: process.env.DB_USER || 'root',
     password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'shriram_matka'
+    database: process.env.DB_NAME || 'shriram_matka',
+    connectionLimit: 50,
+    waitForConnections: true,
+    queueLimit: 0
 });
 
 // --- MIDNIGHT RESET ENGINE ---
@@ -248,6 +251,27 @@ const syncSchema = () => {
             console.log("Adding auto_reset_midnight column to site_settings...");
             db.query("ALTER TABLE site_settings ADD COLUMN auto_reset_midnight TINYINT(1) DEFAULT 1");
         }
+    });
+
+    // --- Performance Optimization Indices ---
+    const indices = [
+        ['users', 'mobile'],
+        ['bets', 'user_mobile'],
+        ['bets', 'game_name'],
+        ['results', 'game_name'],
+        ['results', 'result_date'],
+        ['games', 'name']
+    ];
+
+    indices.forEach(([table, column]) => {
+        db.query(`SHOW INDEX FROM ${table} WHERE Column_name = ?`, [column], (err, rows) => {
+            if (!err && rows.length === 0) {
+                console.log(`🚀 Adding performance index to ${table}(${column})...`);
+                db.query(`ALTER TABLE ${table} ADD INDEX (${column})`, (idxErr) => {
+                    if (idxErr) console.error(`Error adding index to ${table}(${column}):`, idxErr.message);
+                });
+            }
+        });
     });
 };
 
