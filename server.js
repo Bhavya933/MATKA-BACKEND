@@ -1081,8 +1081,8 @@ app.post('/api/bets', (req, res) => {
 
 // Declare Result Route (Manual Trigger)
 app.post('/api/declare-result', (req, res) => {
-    const { game_name, number } = req.body;
-    const resultDate = new Date().toISOString().slice(0, 10);
+    const { game_name, number, result_date } = req.body;
+    const finalResultDate = result_date || new Date().toISOString().slice(0, 10);
     
     // 1. Update Game
     db.query('UPDATE games SET number = ? WHERE name = ?', [number, game_name], (err, results) => {
@@ -1090,7 +1090,7 @@ app.post('/api/declare-result', (req, res) => {
         
         // 2. Save to History
         db.query('INSERT INTO results (game_name, result_date, number) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE number = ?', 
-        [game_name, resultDate, number, number]);
+        [game_name, finalResultDate, number, number]);
 
         // 3. Settle Bets
         settleBets(game_name, number, (settleRes) => {
