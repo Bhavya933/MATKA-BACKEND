@@ -330,7 +330,7 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
         }
 
         const game = gameResults[0];
-        const isOpenMidnight = game.open_time > game.close_time;
+        const isOpenMidnight = game.openTime > game.closeTime;
         
         // Ensure date is in YYYY-MM-DD format
         let targetDate = resultDate ? resultDate : new Date().toISOString().slice(0, 10);
@@ -341,16 +341,15 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
         }
 
         // Precise Session Window Calculation
-        // Session Start: targetDate + game.open_time
-        // Session End: targetDate + game.close_time (+1 day if midnight)
-        const sessionStart = `${targetDate} ${game.open_time}`;
-        let sessionEnd = `${targetDate} ${game.close_time}`;
+        // Session Start: targetDate + game.openTime
+        // Session End: targetDate + game.closeTime (+1 day if midnight)
+        const sessionStart = `${targetDate} ${game.openTime}`;
+        let sessionEnd = `${targetDate} ${game.closeTime}`;
         
         if (isOpenMidnight) {
-            // If it's a midnight game, the session ends on the NEXT calendar day
             const nextDay = new Date(targetDate);
             nextDay.setDate(nextDay.getDate() + 1);
-            sessionEnd = `${nextDay.toISOString().slice(0, 10)} ${game.close_time}`;
+            sessionEnd = `${nextDay.toISOString().slice(0, 10)} ${game.closeTime}`;
         }
 
         console.log(`🎯 Settling bets for ${game_name} | Session: ${sessionStart} to ${sessionEnd}`);
@@ -375,7 +374,7 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
             });
 
             if (!pendingBets || pendingBets.length === 0) {
-                console.log(`No pending bets found for ${game_name} session starting ${startTime}.`);
+                console.log(`No pending bets found for ${game_name} session starting ${sessionStart}.`);
                 if (callback) callback({ message: 'No bets to settle' });
                 return;
             }
