@@ -310,141 +310,175 @@ setTimeout(() => {
 // =======================
 // THE ROBUST BET SETTLEMENT ENGINE
 // THE MASTER BET SETTLEMENT ENGINE
-const settleBets = (game_name, inputNumber, callback) => {
+const settleBets = (game_name, inputNumber, arg3, arg4) => {
+    let resultDate = null;
+    let callback = null;
+    if (typeof arg3 === 'function') {
+        callback = arg3;
+    } else {
+        resultDate = arg3;
+        callback = arg4;
+    }
     const number = (inputNumber || 'XXX-XX-XXX').toUpperCase();
-    console.log(`🎯 Settling bets for ${game_name} with result ${number}`);
-
-    // Robust Catch-all query for PENDING or Placed
-    // Only settle bets from the last 24 hours to avoid session confusion
-    const query = 'SELECT * FROM bets WHERE TRIM(game_name) = ? AND (status = "Placed" OR UPPER(status) = "PENDING" OR UPPER(status) = "LOST") AND payoutDone = 0 AND created_at >= NOW() - INTERVAL 1 DAY';
-    db.query(query, [game_name.trim()], (err, pendingBets) => {
-        if (err) {
-            console.error("Fetch pending bets error:", err.message);
-            if (callback) callback({ error: err.message });
+    
+    // 1. Fetch game details to check if it's a midnight game
+    db.query('SELECT open_time, close_time FROM games WHERE name = ?', [game_name.trim()], (gameErr, gameResults) => {
+        if (gameErr || gameResults.length === 0) {
+            console.error("SettleBets: Game not found", game_name);
+            if (callback) callback({ error: "Game not found" });
             return;
         }
 
-        if (!pendingBets || pendingBets.length === 0) {
-            console.log(`No pending bets found for ${game_name}.`);
-            // Even if no bets to settle, update the result_number for everyone else to keep history consistent
-            // Only update history for the last 24 hours to keep history persistent
-            db.query('UPDATE bets SET result_number = ? WHERE TRIM(game_name) = ? AND created_at >= NOW() - INTERVAL 1 DAY', [number, game_name.trim()]);
-            if (callback) callback({ message: 'No bets to settle' });
-            return;
-        }
+        const game = gameResults[0];
+        const isOpenMidnight = game.open_time > game.close_time;
+        const targetDate = resultDate ? resultDate : new Date().toISOString().slice(0, 10);
+        
+        // Define precise session window
+        // Start: Target Date at 00:00:00
+        // End: If midnight game, allow until 6 AM next day. Otherwise, end of Target Date.
+        const startTime = `${targetDate} 00:00:00`;
+        const endTime = isOpenMidnight 
+            ? `${targetDate} 23:59:59` // We will add the interval in SQL
+            : `${targetDate} 23:59:59`;
 
-        // Broad update to ensure current sesssion (last 24h) history is consistent
-        db.query('UPDATE bets SET result_number = ? WHERE TRIM(game_name) = ? AND created_at >= NOW() - INTERVAL 1 DAY', [number, game_name.trim()]);
+        console.log(`🎯 Settling bets for ${game_name} (${isOpenMidnight ? 'Midnight' : 'Normal'}) | Result: ${number} | Session Date: ${targetDate}`);
 
-        const parts = (number || '').split('-');
-        let openPanna = 'XXX', jodi = 'XX', closePanna = 'XXX';
+        // SQL Query with precise window
+        // If midnight, we allow bets placed up to 6 hours into the next day
+        const windowCondition = isOpenMidnight 
+            ? `created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 30 HOUR)`
+            : `created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 24 HOUR)`;
 
-        if (parts.length === 3) {
-            openPanna = parts[0];
-            jodi = parts[1];
-            closePanna = parts[2];
-        } else if (parts.length === 1 && number.length === 1 && /[0-9]/.test(number)) {
-            jodi = number + 'X';
-        } else if (parts.length === 1 && number.length === 2 && /[0-9]/.test(number)) {
-            jodi = number;
-        }
-
-        const openDigit = jodi[0] || 'X';
-        const closeDigit = jodi[1] || 'X';
-
-        const isOpenDigitDeclared = /[0-9]/.test(openDigit);
-        const isCloseDigitDeclared = /[0-9]/.test(closeDigit);
-        const isOpenPannaDeclared = openPanna.length === 3 && !openPanna.includes('X');
-        const isClosePannaDeclared = closePanna.length === 3 && !closePanna.includes('X');
-        const isJodiDeclared = jodi.length === 2 && !jodi.includes('X');
-
-        let processed = 0;
-        const processNext = () => {
-            if (processed >= pendingBets.length) {
-                console.log(`✅ All ${pendingBets.length} bets for ${game_name} settled.`);
-                if (callback) callback({ message: `Settled ${pendingBets.length} bets` });
+        const query = `
+            SELECT * FROM bets 
+            WHERE TRIM(game_name) = ? 
+            AND (status = "Placed" OR UPPER(status) = "PENDING" OR UPPER(status) = "LOST") 
+            AND payoutDone = 0 
+            AND ${windowCondition}
+        `;
+        
+        db.query(query, [game_name.trim(), startTime, startTime], (err, pendingBets) => {
+            if (err) {
+                console.error("Fetch pending bets error:", err.message);
+                if (callback) callback({ error: err.message });
                 return;
             }
 
-            const bet = pendingBets[processed++];
-            const gt = String(bet.game_type || '').toLowerCase().trim();
-            const betNumber = String(bet.number || '').trim();
-            let outcome = 'PENDING';
-            let multiplier = 10; // Default to 10 for safety
+            // Always update result_number for the entire session window to keep history consistent
+            db.query(`UPDATE bets SET result_number = ? WHERE TRIM(game_name) = ? AND ${windowCondition}`, 
+            [number, game_name.trim(), startTime, startTime]);
 
-            try {
-                if (gt.includes('single digit')) {
-                    multiplier = 10;
-                    if (bet.session === 'OPEN' && isOpenDigitDeclared) outcome = (betNumber === openDigit) ? 'Won' : 'Lost';
-                    else if (bet.session === 'CLOSE' && isCloseDigitDeclared) outcome = (betNumber === closeDigit) ? 'Won' : 'Lost';
-                } else if (gt.includes('double digit') || gt.includes('jodi')) {
-                    multiplier = 100;
-                    if (isJodiDeclared) outcome = (betNumber === jodi) ? 'Won' : 'Lost';
-                } else if (gt.includes('single panna')) {
-                    multiplier = 160;
-                    if (bet.session === 'OPEN' && isOpenPannaDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
-                    else if (bet.session === 'CLOSE' && isClosePannaDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
-                } else if (gt.includes('double panna')) {
-                    multiplier = 320;
-                    if (bet.session === 'OPEN' && isOpenPannaDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
-                    else if (bet.session === 'CLOSE' && isClosePannaDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
-                } else if (gt.includes('triple panna')) {
-                    multiplier = 700;
-                    if (bet.session === 'OPEN' && isOpenPannaDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
-                    else if (bet.session === 'CLOSE' && isClosePannaDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
-                } else if (gt.includes('half sangam')) {
-                    multiplier = 1000;
-                    const bParts = betNumber.split(/[x×]/);
-                    if (bParts.length >= 2) {
-                        if (bet.session === 'OPEN' && isOpenPannaDeclared && isCloseDigitDeclared) {
-                           outcome = (bParts[0].trim() === openPanna && bParts[1].trim() === closeDigit) ? 'Won' : 'Lost';
-                        } else if (bet.session === 'CLOSE' && isClosePannaDeclared && isOpenDigitDeclared) {
-                           outcome = (bParts[0].trim() === closePanna && bParts[1].trim() === openDigit) ? 'Won' : 'Lost';
-                        }
-                    }
-                } else if (gt.includes('full sangam')) {
-                    multiplier = 10000;
-                    const bParts = betNumber.split(/[x×]/);
-                    if (bParts.length >= 2 && isOpenPannaDeclared && isClosePannaDeclared) {
-                        outcome = (bParts[0].trim() === openPanna && bParts[1].trim() === closePanna) ? 'Won' : 'Lost';
-                    }
-                }
-            } catch (calcErr) {
-                console.error("Settlement Calc Error:", calcErr);
-                outcome = 'PENDING';
+            if (!pendingBets || pendingBets.length === 0) {
+                console.log(`No pending bets found for ${game_name} session starting ${startTime}.`);
+                if (callback) callback({ message: 'No bets to settle' });
+                return;
             }
 
-            if (outcome === 'Won') {
-                const winAmount = bet.points * multiplier;
-                db.query('UPDATE users SET balance = balance + ? WHERE mobile = ?', [winAmount, bet.user_mobile], (err) => {
-                    if (err) console.error("Balance update failed:", err.message);
-                    // 3. Final Step: Mark as Won in DB
-                    // Note: Using 'Won' case to match strict ENUMs
-                    db.query('UPDATE bets SET status = "Won", result_number = ?, payoutDone = 1 WHERE id = ?', [number, bet.id], (err) => {
+            const parts = (number || '').split('-');
+            let openPanna = 'XXX', jodi = 'XX', closePanna = 'XXX';
+
+            if (parts.length === 3) {
+                openPanna = parts[0];
+                jodi = parts[1];
+                closePanna = parts[2];
+            } else if (parts.length === 1 && number.length === 1 && /[0-9]/.test(number)) {
+                jodi = number + 'X';
+            } else if (parts.length === 1 && number.length === 2 && /[0-9]/.test(number)) {
+                jodi = number;
+            }
+
+            const openDigit = jodi[0] || 'X';
+            const closeDigit = jodi[1] || 'X';
+
+            const isOpenDigitDeclared = /[0-9]/.test(openDigit);
+            const isCloseDigitDeclared = /[0-9]/.test(closeDigit);
+            const isOpenPannaDeclared = openPanna.length === 3 && !openPanna.includes('X');
+            const isClosePannaDeclared = closePanna.length === 3 && !closePanna.includes('X');
+            const isJodiDeclared = jodi.length === 2 && !jodi.includes('X');
+
+            let processed = 0;
+            const processNext = () => {
+                if (processed >= pendingBets.length) {
+                    console.log(`✅ All ${pendingBets.length} bets for ${game_name} settled.`);
+                    if (callback) callback({ message: `Settled ${pendingBets.length} bets` });
+                    return;
+                }
+
+                const bet = pendingBets[processed++];
+                const gt = String(bet.game_type || '').toLowerCase().trim();
+                const betNumber = String(bet.number || '').trim();
+                let outcome = 'PENDING';
+                let multiplier = 10; 
+
+                try {
+                    if (gt.includes('single digit')) {
+                        multiplier = 10;
+                        if (bet.session === 'OPEN' && isOpenDigitDeclared) outcome = (betNumber === openDigit) ? 'Won' : 'Lost';
+                        else if (bet.session === 'CLOSE' && isCloseDigitDeclared) outcome = (betNumber === closeDigit) ? 'Won' : 'Lost';
+                    } else if (gt.includes('double digit') || gt.includes('jodi')) {
+                        multiplier = 100;
+                        if (isJodiDeclared) outcome = (betNumber === jodi) ? 'Won' : 'Lost';
+                    } else if (gt.includes('single panna')) {
+                        multiplier = 160;
+                        if (bet.session === 'OPEN' && isOpenPannaDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
+                        else if (bet.session === 'CLOSE' && isClosePannaDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
+                    } else if (gt.includes('double panna')) {
+                        multiplier = 320;
+                        if (bet.session === 'OPEN' && isOpenPannaDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
+                        else if (bet.session === 'CLOSE' && isClosePannaDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
+                    } else if (gt.includes('triple panna')) {
+                        multiplier = 700;
+                        if (bet.session === 'OPEN' && isOpenPannaDeclared) outcome = (betNumber === openPanna) ? 'Won' : 'Lost';
+                        else if (bet.session === 'CLOSE' && isClosePannaDeclared) outcome = (betNumber === closePanna) ? 'Won' : 'Lost';
+                    } else if (gt.includes('half sangam')) {
+                        multiplier = 1000;
+                        const bParts = betNumber.split(/[x×]/);
+                        if (bParts.length >= 2) {
+                            if (bet.session === 'OPEN' && isOpenPannaDeclared && isCloseDigitDeclared) {
+                                outcome = (bParts[0].trim() === openPanna && bParts[1].trim() === closeDigit) ? 'Won' : 'Lost';
+                            } else if (bet.session === 'CLOSE' && isClosePannaDeclared && isOpenDigitDeclared) {
+                                outcome = (bParts[0].trim() === closePanna && bParts[1].trim() === openDigit) ? 'Won' : 'Lost';
+                            }
+                        }
+                    } else if (gt.includes('full sangam')) {
+                        multiplier = 10000;
+                        const bParts = betNumber.split(/[x×]/);
+                        if (bParts.length >= 2 && isOpenPannaDeclared && isClosePannaDeclared) {
+                            outcome = (bParts[0].trim() === openPanna && bParts[1].trim() === closePanna) ? 'Won' : 'Lost';
+                        }
+                    }
+                } catch (calcErr) {
+                    console.error("Settlement Calc Error:", calcErr);
+                    outcome = 'PENDING';
+                }
+
+                if (outcome === 'Won') {
+                    const winAmount = bet.points * multiplier;
+                    db.query('UPDATE users SET balance = balance + ? WHERE mobile = ?', [winAmount, bet.user_mobile], (err) => {
+                        if (err) console.error("Balance update failed:", err.message);
+                        db.query('UPDATE bets SET status = "Won", result_number = ?, payoutDone = 1 WHERE id = ?', [number, bet.id], (err) => {
+                            if (err) {
+                                db.query('UPDATE bets SET status = "won", result_number = ?, payoutDone = 1 WHERE id = ?', [number, bet.id], () => processNext());
+                            } else {
+                                processNext();
+                            }
+                        });
+                    });
+                } else if (outcome === 'Lost') {
+                    db.query('UPDATE bets SET status = "Lost", result_number = ? WHERE id = ?', [number, bet.id], (err) => {
                         if (err) {
-                            console.error(`❌ STATUS UPDATE FAILED for Bet ${bet.id}:`, err.message);
-                            // Fallback: try lowercase 'won' if strict enum is failing
-                            db.query('UPDATE bets SET status = "won", result_number = ?, payoutDone = 1 WHERE id = ?', [number, bet.id], () => processNext());
+                            db.query('UPDATE bets SET status = "lost", result_number = ? WHERE id = ?', [number, bet.id], () => processNext());
                         } else {
-                            console.log(`✅ Bet ${bet.id} fully settled as Won.`);
                             processNext();
                         }
                     });
-                });
-            } else if (outcome === 'Lost') {
-                db.query('UPDATE bets SET status = "Lost", result_number = ? WHERE id = ?', [number, bet.id], (err) => {
-                    if (err) {
-                        db.query('UPDATE bets SET status = "lost", result_number = ? WHERE id = ?', [number, bet.id], () => processNext());
-                    } else {
-                        processNext();
-                    }
-                });
-            } else {
-                processNext();
-            }
-        };
+                } else {
+                    processNext();
+                }
+            };
 
-        processNext();
+            processNext();
+        });
     });
 };
 
@@ -1093,7 +1127,7 @@ app.post('/api/declare-result', (req, res) => {
         [game_name, finalResultDate, number, number]);
 
         // 3. Settle Bets
-        settleBets(game_name, number, (settleRes) => {
+        settleBets(game_name, number, finalResultDate, (settleRes) => {
             if (settleRes.error) return res.status(500).json({ error: settleRes.error });
             res.json(settleRes);
         });
