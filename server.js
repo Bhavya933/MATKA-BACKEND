@@ -289,12 +289,20 @@ const repairOldBets = () => {
     });
 };
 
-db.query("Connected to MySQL Database.", () => {
-    console.log('Connected to MySQL Database.');
-});
-
 // --- AUTO-REPAIR DATABASE SCHEMA ---
 syncSchema();
+
+// Ensure results table exists
+db.query(`CREATE TABLE IF NOT EXISTS results (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    game_name VARCHAR(255),
+    result_date DATE,
+    number VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY game_date (game_name, result_date)
+)`, (err) => {
+    if (err) console.error("Error creating results table:", err.message);
+});
 
 // Repair functions
 setTimeout(() => {
@@ -319,7 +327,12 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
     
     // 1. Fetch game details to build precise window
     db.query('SELECT openTime, closeTime FROM games WHERE name = ?', [game_name.trim()], (gameErr, gameResults) => {
-        if (gameErr || gameResults.length === 0) {
+        if (gameErr) {
+            console.error("SettleBets SQL Error:", gameErr.message);
+            if (callback) callback({ error: gameErr.message });
+            return;
+        }
+        if (!gameResults || gameResults.length === 0) {
             console.error("SettleBets: Game not found", game_name);
             if (callback) callback({ error: "Game not found" });
             return;
@@ -1098,12 +1111,14 @@ app.post('/api/declare-result', (req, res) => {
         
         // 2. Save to History
         db.query('INSERT INTO results (game_name, result_date, number) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE number = ?', 
-        [game_name, finalResultDate, number, number]);
+        [game_name, finalResultDate, number, number], (histErr) => {
+            if (histErr) console.error("History Insertion Error:", histErr.message);
 
-        // 3. Settle Bets
-        settleBets(game_name, number, finalResultDate, (settleRes) => {
-            if (settleRes.error) return res.status(500).json({ error: settleRes.error });
-            res.json(settleRes);
+            // 3. Settle Bets (Proceed even if history insert had issues)
+            settleBets(game_name, number, finalResultDate, (settleRes) => {
+                if (settleRes.error) return res.status(500).json({ error: settleRes.error });
+                res.json(settleRes);
+            });
         });
     });
 });
