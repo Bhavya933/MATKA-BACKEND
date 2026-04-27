@@ -352,32 +352,27 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
             else targetDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
         }
 
-        // SIMPLEST CALENDAR DAY LOGIC (User Requested)
-        // Selecting 26th will ONLY settle bets placed on the 26th (00:00 to 23:59)
-        const sessionStart = `${targetDate} 00:00:00`;
-        const sessionEnd = `${targetDate} 23:59:59`;
-
+        // DEFINITIVE TIMEZONE FIX (IST vs UTC)
+        // Convert DB's UTC created_at to IST before matching the selected date
         console.log(`🚀 MASTER SETTLE [${game_name}] | Result: ${number}`);
-        console.log(`📅 Target Date: ${targetDate} | Window: ${sessionStart} to ${sessionEnd}`);
+        console.log(`📅 Matching IST Date: ${targetDate}`);
 
         const query = `
             SELECT * FROM bets 
             WHERE TRIM(game_name) = ? 
-            AND created_at >= ? AND created_at <= ?
+            AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?
         `;
         
-        db.query(query, [game_name.trim(), sessionStart, sessionEnd], (err, pendingBets) => {
+        db.query(query, [game_name.trim(), targetDate], (err, pendingBets) => {
             if (err) {
                 console.error("Fetch pending bets error:", err.message);
                 if (callback) callback({ error: err.message });
                 return;
             }
             
-            console.log(`🔍 Found ${pendingBets ? pendingBets.length : 0} bets in window.`);
-
-            // Always update result_number for the exact session window
-            db.query(`UPDATE bets SET result_number = ? WHERE TRIM(game_name) = ? AND created_at >= ? AND created_at <= ?`, 
-            [number, game_name.trim(), sessionStart, sessionEnd], (uErr) => {
+            // Sync result_number for the same IST date
+            db.query(`UPDATE bets SET result_number = ? WHERE TRIM(game_name) = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`, 
+            [number, game_name.trim(), targetDate], (uErr) => {
                 if (uErr) console.error("Update result_number error:", uErr.message);
             });
 
