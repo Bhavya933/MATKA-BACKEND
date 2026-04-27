@@ -322,7 +322,7 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
     const number = (inputNumber || 'XXX-XX-XXX').toUpperCase();
     
     // 1. Fetch game details to check if it's a midnight game
-    db.query('SELECT open_time, close_time FROM games WHERE name = ?', [game_name.trim()], (gameErr, gameResults) => {
+    db.query('SELECT openTime, closeTime FROM games WHERE name = ?', [game_name.trim()], (gameErr, gameResults) => {
         if (gameErr || gameResults.length === 0) {
             console.error("SettleBets: Game not found", game_name);
             if (callback) callback({ error: "Game not found" });
