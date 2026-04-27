@@ -352,30 +352,10 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
             else targetDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
         }
 
-        // Buffered Session Window Calculation
-        let sessionStart, sessionEnd;
-        
-        if (isOpenMidnight) {
-            // BACK TO USER LOGIC: targetDate is the START of the session
-            // Example: Select 26th -> Settle from 26th Night to 27th Noon
-            const realStartStr = `${targetDate} ${openTime}`;
-            const nextDay = new Date(targetDate);
-            nextDay.setDate(nextDay.getDate() + 1);
-            const realEndStr = `${nextDay.toISOString().slice(0, 10)} ${closeTime}`;
-
-            // Apply 7-hour buffer for IST/UTC offset
-            const sDate = new Date(realStartStr.replace(' ', 'T'));
-            sDate.setHours(sDate.getHours() - 7);
-            const eDate = new Date(realEndStr.replace(' ', 'T'));
-            eDate.setHours(eDate.getHours() + 7);
-
-            sessionStart = sDate.toISOString().replace('T', ' ').slice(0, 19);
-            sessionEnd = eDate.toISOString().replace('T', ' ').slice(0, 19);
-        } else {
-            // Day Game: Full day window
-            sessionStart = `${targetDate} 00:00:00`;
-            sessionEnd = `${targetDate} 23:59:59`;
-        }
+        // SIMPLEST CALENDAR DAY LOGIC (User Requested)
+        // Selecting 26th will ONLY settle bets placed on the 26th (00:00 to 23:59)
+        const sessionStart = `${targetDate} 00:00:00`;
+        const sessionEnd = `${targetDate} 23:59:59`;
 
         console.log(`🚀 MASTER SETTLE [${game_name}] | Result: ${number}`);
         console.log(`📅 Target Date: ${targetDate} | Window: ${sessionStart} to ${sessionEnd}`);
