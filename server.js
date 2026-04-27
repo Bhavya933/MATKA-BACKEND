@@ -353,7 +353,6 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
         const query = `
             SELECT * FROM bets 
             WHERE TRIM(game_name) = ? 
-            AND (status = "Placed" OR UPPER(status) = "PENDING" OR UPPER(status) = "LOST") 
             AND payoutDone = 0 
             AND ${windowCondition}
         `;
@@ -367,7 +366,9 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
 
             // Always update result_number for the entire session window to keep history consistent
             db.query(`UPDATE bets SET result_number = ? WHERE TRIM(game_name) = ? AND ${windowCondition}`, 
-            [number, game_name.trim(), startTime, startTime]);
+            [number, game_name.trim(), startTime, startTime], (uErr) => {
+                if (uErr) console.error("Update result_number error:", uErr.message);
+            });
 
             if (!pendingBets || pendingBets.length === 0) {
                 console.log(`No pending bets found for ${game_name} session starting ${startTime}.`);
@@ -453,26 +454,19 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
                     outcome = 'PENDING';
                 }
 
+                // If outcome is determined (Won or Lost), update status.
+                // Note: We only add balance if status was not already Won to prevent double payment
                 if (outcome === 'Won') {
                     const winAmount = bet.points * multiplier;
-                    db.query('UPDATE users SET balance = balance + ? WHERE mobile = ?', [winAmount, bet.user_mobile], (err) => {
-                        if (err) console.error("Balance update failed:", err.message);
-                        db.query('UPDATE bets SET status = "Won", result_number = ?, payoutDone = 1 WHERE id = ?', [number, bet.id], (err) => {
-                            if (err) {
-                                db.query('UPDATE bets SET status = "won", result_number = ?, payoutDone = 1 WHERE id = ?', [number, bet.id], () => processNext());
-                            } else {
-                                processNext();
-                            }
-                        });
-                    });
+                    const alreadyWon = (bet.status || '').toLowerCase() === 'won';
+                    
+                    if (!alreadyWon) {
+                        db.query('UPDATE users SET balance = balance + ? WHERE mobile = ?', [winAmount, bet.user_mobile]);
+                    }
+
+                    db.query('UPDATE bets SET status = "Won", result_number = ?, payoutDone = 1 WHERE id = ?', [number, bet.id], () => processNext());
                 } else if (outcome === 'Lost') {
-                    db.query('UPDATE bets SET status = "Lost", result_number = ? WHERE id = ?', [number, bet.id], (err) => {
-                        if (err) {
-                            db.query('UPDATE bets SET status = "lost", result_number = ? WHERE id = ?', [number, bet.id], () => processNext());
-                        } else {
-                            processNext();
-                        }
-                    });
+                    db.query('UPDATE bets SET status = "Lost", result_number = ? WHERE id = ?', [number, bet.id], () => processNext());
                 } else {
                     processNext();
                 }
