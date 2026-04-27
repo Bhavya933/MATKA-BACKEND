@@ -352,14 +352,19 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
             else targetDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
         }
 
-        // Precise Session Window: startTime (Game Open) to endTime (Game Close)
-        const sessionStart = `${targetDate} ${openTime}`;
-        let sessionEnd = `${targetDate} ${closeTime}`;
+        // Precise Session Window Calculation
+        let sessionStart, sessionEnd;
         
         if (isOpenMidnight) {
+            // Midnight Game: Precise window from Open Time to Close Time (next day)
+            sessionStart = `${targetDate} ${openTime}`;
             const nextDay = new Date(targetDate);
             nextDay.setDate(nextDay.getDate() + 1);
             sessionEnd = `${nextDay.toISOString().slice(0, 10)} ${closeTime}`;
+        } else {
+            // Day Game: Full day window to catch early morning bets
+            sessionStart = `${targetDate} 00:00:00`;
+            sessionEnd = `${targetDate} 23:59:59`;
         }
 
         console.log(`🎯 MASTER SETTLE: ${game_name} | Session: ${sessionStart} to ${sessionEnd} | Result: ${number}`);
