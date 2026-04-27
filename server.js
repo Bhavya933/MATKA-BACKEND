@@ -326,7 +326,7 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
     const number = (inputNumber || 'XXX-XX-XXX').toUpperCase();
     
     // 1. Fetch game details to build precise window
-    db.query('SELECT openTime, closeTime FROM games WHERE name = ?', [game_name.trim()], (gameErr, gameResults) => {
+    db.query('SELECT * FROM games WHERE name = ?', [game_name.trim()], (gameErr, gameResults) => {
         if (gameErr) {
             console.error("SettleBets SQL Error:", gameErr.message);
             if (callback) callback({ error: gameErr.message });
@@ -339,7 +339,10 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
         }
 
         const game = gameResults[0];
-        const isOpenMidnight = game.openTime > game.closeTime;
+        // Support both openTime (local) and open_time (server)
+        const openTime = game.openTime || game.open_time;
+        const closeTime = game.closeTime || game.close_time;
+        const isOpenMidnight = openTime > closeTime;
         
         // Ensure date is in YYYY-MM-DD format
         let targetDate = resultDate ? resultDate : new Date().toISOString().slice(0, 10);
@@ -350,13 +353,13 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
         }
 
         // Precise Session Window: startTime (Game Open) to endTime (Game Close)
-        const sessionStart = `${targetDate} ${game.openTime}`;
-        let sessionEnd = `${targetDate} ${game.closeTime}`;
+        const sessionStart = `${targetDate} ${openTime}`;
+        let sessionEnd = `${targetDate} ${closeTime}`;
         
         if (isOpenMidnight) {
             const nextDay = new Date(targetDate);
             nextDay.setDate(nextDay.getDate() + 1);
-            sessionEnd = `${nextDay.toISOString().slice(0, 10)} ${game.closeTime}`;
+            sessionEnd = `${nextDay.toISOString().slice(0, 10)} ${closeTime}`;
         }
 
         console.log(`🎯 MASTER SETTLE: ${game_name} | Session: ${sessionStart} to ${sessionEnd} | Result: ${number}`);
