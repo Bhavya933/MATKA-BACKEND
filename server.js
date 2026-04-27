@@ -331,22 +331,23 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
 
         const game = gameResults[0];
         const isOpenMidnight = game.open_time > game.close_time;
-        const targetDate = resultDate ? resultDate : new Date().toISOString().slice(0, 10);
         
-        // Define precise session window
-        // Start: Target Date at 00:00:00
-        // End: If midnight game, allow until 6 AM next day. Otherwise, end of Target Date.
-        const startTime = `${targetDate} 00:00:00`;
-        const endTime = isOpenMidnight 
-            ? `${targetDate} 23:59:59` // We will add the interval in SQL
-            : `${targetDate} 23:59:59`;
+        // Ensure date is in YYYY-MM-DD format
+        let targetDate = resultDate ? resultDate : new Date().toISOString().slice(0, 10);
+        if (targetDate.includes('/')) {
+            const parts = targetDate.split('/');
+            if (parts[0].length === 4) targetDate = `${parts[0]}-${parts[1]}-${parts[2]}`;
+            else targetDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
+        }
 
+        const startTime = `${targetDate} 00:00:00`;
         console.log(`🎯 Settling bets for ${game_name} (${isOpenMidnight ? 'Midnight' : 'Normal'}) | Result: ${number} | Session Date: ${targetDate}`);
 
         // SQL Query with precise window
-        // If midnight, we allow bets placed up to 6 hours into the next day
+        // For midnight games, we allow a massive 42-hour window (1.75 days) 
+        // to catch bets placed the next morning/afternoon for the same session.
         const windowCondition = isOpenMidnight 
-            ? `created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 30 HOUR)`
+            ? `created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 42 HOUR)`
             : `created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 24 HOUR)`;
 
         const query = `
