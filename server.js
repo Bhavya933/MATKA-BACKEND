@@ -356,11 +356,12 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
         let sessionStart, sessionEnd;
         
         if (isOpenMidnight) {
-            // Midnight Game: Precise window from Open Time to Close Time (next day)
-            sessionStart = `${targetDate} ${openTime}`;
-            const nextDay = new Date(targetDate);
-            nextDay.setDate(nextDay.getDate() + 1);
-            sessionEnd = `${nextDay.toISOString().slice(0, 10)} ${closeTime}`;
+            // Midnight Game: Treat targetDate as the END of the session
+            // Example: Select 27th -> Settle from 26th Night to 27th Morning
+            sessionEnd = `${targetDate} ${closeTime}`;
+            const prevDay = new Date(targetDate);
+            prevDay.setDate(prevDay.getDate() - 1);
+            sessionStart = `${prevDay.toISOString().slice(0, 10)} ${openTime}`;
         } else {
             // Day Game: Full day window to catch early morning bets
             sessionStart = `${targetDate} 00:00:00`;
