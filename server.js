@@ -1094,16 +1094,35 @@ app.post('/api/bets', (req, res) => {
                 return res.status(400).json({ error: 'Insufficient Balance (Race Condition)' });
             }
 
-            // 3. Insert Bet
-            const betSql = 'INSERT INTO bets (user_id, user_mobile, game_name, game_type, session, number, points, status) VALUES (?, ?, ?, ?, ?, ?, ?, "PENDING")';
-            db.query(betSql, [userId, user_mobile, game_name, game_type, session, number, points], (bErr) => {
-                if (bErr) {
-                    // Critical: Try to refund if bet insert fails
-                    db.query('UPDATE users SET balance = balance + ? WHERE mobile = ?', [points, user_mobile]);
-                    return res.status(500).json({ error: 'Bet Recording Failed' });
+            // --- MIDNIGHT SESSION DATE ADJUSTMENT ---
+            db.query('SELECT * FROM games WHERE TRIM(name) = ?', [game_name.trim()], (gErr, gRes) => {
+                let adjustedDateStr = 'NOW()';
+                if (!gErr && gRes.length > 0) {
+                    const game = gRes[0];
+                    const openT = game.openTime || game.open_time || '';
+                    const closeT = game.closeTime || game.close_time || '';
+                    const isMid = (openT && closeT && openT > closeT); 
+                    
+                    const now = new Date();
+                    const istOffset = 5.5 * 60 * 60 * 1000;
+                    const istTime = new Date(now.getTime() + istOffset);
+                    const hour = istTime.getUTCHours(); 
+
+                    if (isMid && hour < 14) {
+                        // After midnight but before session ends
+                        adjustedDateStr = 'DATE_SUB(NOW(), INTERVAL 15 HOUR)';
+                        console.log(`🌙 Midnight Session: Pushing date back for ${game_name}`);
+                    }
                 }
-                
-                res.json({ message: 'Bet placed successfully!', newBalance: balance - points });
+
+                const betSql = `INSERT INTO bets (user_id, user_mobile, game_name, game_type, session, number, points, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, "PENDING", ${adjustedDateStr})`;
+                db.query(betSql, [user_id, user_mobile, game_name, game_type, session, number, points], (bErr, bRes) => {
+                    if (bErr) {
+                        console.error('Place bet error:', bErr.message);
+                        return res.status(500).json({ success: false, message: 'Failed to place bet' });
+                    }
+                    res.json({ success: true, message: 'Bet placed successfully', balance: currentBalance - points });
+                });
             });
         });
     });
