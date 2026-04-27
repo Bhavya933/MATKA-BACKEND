@@ -468,7 +468,8 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
                 if (currentStatus === 'WON' && outcome === 'LOST') {
                     // 1. REVERSAL: User was WON, now they are LOST (Result Correction)
                     console.log(`💸 DEDUCTING: ${winAmount} from UserID: ${bet.user_id} | Mob: ${bet.user_mobile}`);
-                    db.query('UPDATE users SET balance = balance - ? WHERE id = ? OR mobile = ?', [winAmount, bet.user_id, bet.user_mobile], (err, res) => {
+                    const revSql = `UPDATE users SET balance = balance - ${winAmount} WHERE id = ${bet.user_id} OR mobile = '${bet.user_mobile}'`;
+                    db.query(revSql, (err, res) => {
                         if (err) console.error("Reversal Wallet Error:", err.message);
                         else console.log(`✅ Deduction Success. Rows affected: ${res.affectedRows}`);
                         db.query('UPDATE bets SET status = "LOST", result_number = ?, payoutDone = 0 WHERE id = ?', [number, bet.id], () => processNext());
@@ -476,7 +477,8 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
                 } else if (currentStatus !== 'WON' && outcome === 'WON') {
                     // 2. NEW WIN: User was PENDING/LOST, now they are WON
                     console.log(`💰 PAYING: ${winAmount} to UserID: ${bet.user_id} | Mob: ${bet.user_mobile}`);
-                    db.query('UPDATE users SET balance = balance + ? WHERE id = ? OR mobile = ?', [winAmount, bet.user_id, bet.user_mobile], (err, res) => {
+                    const winSql = `UPDATE users SET balance = balance + ${winAmount} WHERE id = ${bet.user_id} OR mobile = '${bet.user_mobile}'`;
+                    db.query(winSql, (err, res) => {
                         if (err) console.error("Payout Wallet Error:", err.message);
                         else console.log(`✅ Payout Success. Rows affected: ${res.affectedRows}`);
                         db.query('UPDATE bets SET status = "WON", result_number = ?, payoutDone = 1 WHERE id = ?', [number, bet.id], () => processNext());
