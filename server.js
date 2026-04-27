@@ -352,19 +352,25 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
             else targetDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
         }
 
-        // Precise Session Window Calculation
+        // Buffered Session Window Calculation
         let sessionStart, sessionEnd;
         
         if (isOpenMidnight) {
-            // TIMEZONE-SAFE BROAD WINDOW (48 Hours)
-            // Settle everything from the start of the previous day until the end of the target day.
-            // This ensures that IST vs UTC timezone offsets never cause a bet to be missed.
-            const prevDay = new Date(targetDate);
-            prevDay.setDate(prevDay.getDate() - 1);
-            const prevDayStr = prevDay.toISOString().slice(0, 10);
-            
-            sessionStart = `${prevDayStr} 00:00:00`;
-            sessionEnd = `${targetDate} 23:59:59`;
+            // BACK TO USER LOGIC: targetDate is the START of the session
+            // Example: Select 26th -> Settle from 26th Night to 27th Noon
+            const realStartStr = `${targetDate} ${openTime}`;
+            const nextDay = new Date(targetDate);
+            nextDay.setDate(nextDay.getDate() + 1);
+            const realEndStr = `${nextDay.toISOString().slice(0, 10)} ${closeTime}`;
+
+            // Apply 7-hour buffer for IST/UTC offset
+            const sDate = new Date(realStartStr.replace(' ', 'T'));
+            sDate.setHours(sDate.getHours() - 7);
+            const eDate = new Date(realEndStr.replace(' ', 'T'));
+            eDate.setHours(eDate.getHours() + 7);
+
+            sessionStart = sDate.toISOString().replace('T', ' ').slice(0, 19);
+            sessionEnd = eDate.toISOString().replace('T', ' ').slice(0, 19);
         } else {
             // Day Game: Full day window
             sessionStart = `${targetDate} 00:00:00`;
