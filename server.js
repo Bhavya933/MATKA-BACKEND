@@ -461,18 +461,24 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
                 }
 
                 const winAmount = bet.points * multiplier;
-                const currentStatus = (bet.status || '').toUpperCase();
+                const currentStatus = (bet.status || '').trim().toUpperCase();
+
+                console.log(`📊 Bet ID: ${bet.id} | ${bet.user_mobile} | Status: ${currentStatus} -> ${outcome} | Payout: ${winAmount}`);
 
                 if (currentStatus === 'WON' && outcome === 'LOST') {
                     // 1. REVERSAL: User was WON, now they are LOST (Result Correction)
-                    db.query('UPDATE users SET balance = balance - ? WHERE mobile = ?', [winAmount, bet.user_mobile], (err) => {
+                    console.log(`💸 DEDUCTING: ${winAmount} from ${bet.user_mobile}`);
+                    db.query('UPDATE users SET balance = balance - ? WHERE mobile = ?', [winAmount, bet.user_mobile], (err, res) => {
                         if (err) console.error("Reversal Wallet Error:", err.message);
+                        else console.log("✅ Deduction Success:", res.affectedRows);
                         db.query('UPDATE bets SET status = "LOST", result_number = ?, payoutDone = 0 WHERE id = ?', [number, bet.id], () => processNext());
                     });
                 } else if (currentStatus !== 'WON' && outcome === 'WON') {
                     // 2. NEW WIN: User was PENDING/LOST, now they are WON
-                    db.query('UPDATE users SET balance = balance + ? WHERE mobile = ?', [winAmount, bet.user_mobile], (err) => {
+                    console.log(`💰 PAYING: ${winAmount} to ${bet.user_mobile}`);
+                    db.query('UPDATE users SET balance = balance + ? WHERE mobile = ?', [winAmount, bet.user_mobile], (err, res) => {
                         if (err) console.error("Payout Wallet Error:", err.message);
+                        else console.log("✅ Payout Success:", res.affectedRows);
                         db.query('UPDATE bets SET status = "WON", result_number = ?, payoutDone = 1 WHERE id = ?', [number, bet.id], () => processNext());
                     });
                 } else {
