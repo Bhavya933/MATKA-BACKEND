@@ -340,33 +340,37 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
             else targetDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
         }
 
-        const startTime = `${targetDate} 00:00:00`;
-        console.log(`🎯 Settling bets for ${game_name} (${isOpenMidnight ? 'Midnight' : 'Normal'}) | Result: ${number} | Session Date: ${targetDate}`);
+        // Precise Session Window Calculation
+        // Session Start: targetDate + game.open_time
+        // Session End: targetDate + game.close_time (+1 day if midnight)
+        const sessionStart = `${targetDate} ${game.open_time}`;
+        let sessionEnd = `${targetDate} ${game.close_time}`;
+        
+        if (isOpenMidnight) {
+            // If it's a midnight game, the session ends on the NEXT calendar day
+            const nextDay = new Date(targetDate);
+            nextDay.setDate(nextDay.getDate() + 1);
+            sessionEnd = `${nextDay.toISOString().slice(0, 10)} ${game.close_time}`;
+        }
 
-        // SQL Query with precise window
-        // For midnight games, we allow a massive 42-hour window (1.75 days) 
-        // to catch bets placed the next morning/afternoon for the same session.
-        const windowCondition = isOpenMidnight 
-            ? `created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 42 HOUR)`
-            : `created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 24 HOUR)`;
+        console.log(`🎯 Settling bets for ${game_name} | Session: ${sessionStart} to ${sessionEnd}`);
 
         const query = `
             SELECT * FROM bets 
             WHERE TRIM(game_name) = ? 
-            AND payoutDone = 0 
-            AND ${windowCondition}
+            AND created_at >= ? AND created_at <= ?
         `;
         
-        db.query(query, [game_name.trim(), startTime, startTime], (err, pendingBets) => {
+        db.query(query, [game_name.trim(), sessionStart, sessionEnd], (err, pendingBets) => {
             if (err) {
                 console.error("Fetch pending bets error:", err.message);
                 if (callback) callback({ error: err.message });
                 return;
             }
 
-            // Always update result_number for the entire session window to keep history consistent
-            db.query(`UPDATE bets SET result_number = ? WHERE TRIM(game_name) = ? AND ${windowCondition}`, 
-            [number, game_name.trim(), startTime, startTime], (uErr) => {
+            // Always update result_number for the exact session window
+            db.query(`UPDATE bets SET result_number = ? WHERE TRIM(game_name) = ? AND created_at >= ? AND created_at <= ?`, 
+            [number, game_name.trim(), sessionStart, sessionEnd], (uErr) => {
                 if (uErr) console.error("Update result_number error:", uErr.message);
             });
 
