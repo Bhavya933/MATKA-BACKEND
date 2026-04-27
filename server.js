@@ -356,19 +356,23 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
         let sessionStart, sessionEnd;
         
         if (isOpenMidnight) {
-            // Midnight Game: Treat targetDate as the END of the session
-            // Example: Select 27th -> Settle from 26th Night to 27th Morning
-            sessionEnd = `${targetDate} ${closeTime}`;
+            // TIMEZONE-SAFE BROAD WINDOW (48 Hours)
+            // Settle everything from the start of the previous day until the end of the target day.
+            // This ensures that IST vs UTC timezone offsets never cause a bet to be missed.
             const prevDay = new Date(targetDate);
             prevDay.setDate(prevDay.getDate() - 1);
-            sessionStart = `${prevDay.toISOString().slice(0, 10)} ${openTime}`;
+            const prevDayStr = prevDay.toISOString().slice(0, 10);
+            
+            sessionStart = `${prevDayStr} 00:00:00`;
+            sessionEnd = `${targetDate} 23:59:59`;
         } else {
-            // Day Game: Full day window to catch early morning bets
+            // Day Game: Full day window
             sessionStart = `${targetDate} 00:00:00`;
             sessionEnd = `${targetDate} 23:59:59`;
         }
 
-        console.log(`🎯 MASTER SETTLE: ${game_name} | Session: ${sessionStart} to ${sessionEnd} | Result: ${number}`);
+        console.log(`🚀 MASTER SETTLE [${game_name}] | Result: ${number}`);
+        console.log(`📅 Target Date: ${targetDate} | Window: ${sessionStart} to ${sessionEnd}`);
 
         const query = `
             SELECT * FROM bets 
@@ -382,6 +386,8 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
                 if (callback) callback({ error: err.message });
                 return;
             }
+            
+            console.log(`🔍 Found ${pendingBets ? pendingBets.length : 0} bets in window.`);
 
             // Always update result_number for the exact session window
             db.query(`UPDATE bets SET result_number = ? WHERE TRIM(game_name) = ? AND created_at >= ? AND created_at <= ?`, 
