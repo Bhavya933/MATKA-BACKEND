@@ -497,6 +497,24 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
 // =======================
 // AUTH ENDPOINTS
 
+// Signup
+app.post('/api/signup', (req, res) => {
+    const { name, mobile, password } = req.body;
+    
+    // Check if user exists
+    db.query('SELECT * FROM users WHERE mobile = ?', [mobile], (err, results) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (results.length > 0) return res.status(400).json({ error: 'Mobile number already registered' });
+        
+        // Insert new user
+        const sql = 'INSERT INTO users (name, mobile, password, balance, role) VALUES (?, ?, ?, 0, "user")';
+        db.query(sql, [name, mobile, password], (insErr, result) => {
+            if (insErr) return res.status(500).json({ error: insErr.message });
+            res.json({ message: 'Registration successful!', userId: result.insertId });
+        });
+    });
+});
+
 // Login
 app.post('/api/login', (req, res) => {
     const { mobile, password } = req.body;
