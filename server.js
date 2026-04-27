@@ -1116,12 +1116,12 @@ app.post('/api/bets', (req, res) => {
                 }
 
                 const betSql = `INSERT INTO bets (user_id, user_mobile, game_name, game_type, session, number, points, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, "PENDING", ${adjustedDateStr})`;
-                db.query(betSql, [user_id, user_mobile, game_name, game_type, session, number, points], (bErr, bRes) => {
+                db.query(betSql, [userId, user_mobile, game_name, game_type, session, number, points], (bErr, bRes) => {
                     if (bErr) {
                         console.error('Place bet error:', bErr.message);
                         return res.status(500).json({ success: false, message: 'Failed to place bet' });
                     }
-                    res.json({ success: true, message: 'Bet placed successfully', balance: currentBalance - points });
+                    res.json({ success: true, message: 'Bet placed successfully', balance: balance - points });
                 });
             });
         });
