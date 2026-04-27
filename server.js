@@ -460,19 +460,24 @@ const settleBets = (game_name, inputNumber, arg3, arg4) => {
                     outcome = 'PENDING';
                 }
 
-                if (outcome === 'WON') {
-                    const winAmount = bet.points * multiplier;
-                    const alreadyWon = (bet.status || '').toUpperCase() === 'WON';
-                    
-                    if (!alreadyWon) {
-                        db.query('UPDATE users SET balance = balance + ? WHERE mobile = ?', [winAmount, bet.user_mobile]);
-                    }
+                const winAmount = bet.points * multiplier;
+                const currentStatus = (bet.status || '').toUpperCase();
 
-                    db.query('UPDATE bets SET status = "WON", result_number = ?, payoutDone = 1 WHERE id = ?', [number, bet.id], () => processNext());
-                } else if (outcome === 'LOST') {
-                    db.query('UPDATE bets SET status = "LOST", result_number = ? WHERE id = ?', [number, bet.id], () => processNext());
+                if (currentStatus === 'WON' && outcome === 'LOST') {
+                    // 1. REVERSAL: User was WON, now they are LOST (Result Correction)
+                    db.query('UPDATE users SET balance = balance - ? WHERE mobile = ?', [winAmount, bet.user_mobile], (err) => {
+                        if (err) console.error("Reversal Wallet Error:", err.message);
+                        db.query('UPDATE bets SET status = "LOST", result_number = ?, payoutDone = 0 WHERE id = ?', [number, bet.id], () => processNext());
+                    });
+                } else if (currentStatus !== 'WON' && outcome === 'WON') {
+                    // 2. NEW WIN: User was PENDING/LOST, now they are WON
+                    db.query('UPDATE users SET balance = balance + ? WHERE mobile = ?', [winAmount, bet.user_mobile], (err) => {
+                        if (err) console.error("Payout Wallet Error:", err.message);
+                        db.query('UPDATE bets SET status = "WON", result_number = ?, payoutDone = 1 WHERE id = ?', [number, bet.id], () => processNext());
+                    });
                 } else {
-                    processNext();
+                    // 3. NO CHANGE or STILL LOST: Just update status and result_number
+                    db.query('UPDATE bets SET status = ?, result_number = ? WHERE id = ?', [outcome, number, bet.id], () => processNext());
                 }
             };
 
